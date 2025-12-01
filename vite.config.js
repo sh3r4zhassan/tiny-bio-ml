@@ -4,5 +4,5 @@ import react from '@vitejs/plugin-react'
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
-  base: "/tiny-bio-ml/", // <--- This assumes your repo name is 'tiny-bio-ml'
+  base: "./", // <--- This assumes your repo name is 'tiny-bio-ml'
 })
