@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { useStore } from './store/useStore';
 import { useWebSerial } from './hooks/useWebSerial';
+import PinConfigurator from './components/PinConfigurator';
 
 // ==================================================================
 // NAVBAR
@@ -340,69 +341,26 @@ const DeployPanel = ({ model, deployState, boards, selectedBoard, optimizeResult
           </select>
         </div>
 
-        {/* Step 3: Pin Configuration or Sensor Info */}
+        {/* Step 3: Input Source & Pin Configuration */}
         {selectedBoard && (
-          <div>
-            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
-              3. Sensor / Pin Configuration
-            </label>
-            {model.sensor === 'pdm_microphone' ? (
-              <div className="mt-1 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
-                <div className="flex items-center gap-2 font-medium">
-                  <Radio className="w-4 h-4" /> Onboard PDM Microphone
-                </div>
-                <p className="text-xs text-blue-600 mt-1">
-                  This model uses the built-in microphone — no wiring needed.
-                  {model.class_labels && (
-                    <span className="block mt-1">
-                      Detects: {model.class_labels.filter(l => l !== 'silence' && l !== 'unknown').join(', ')}
-                    </span>
-                  )}
-                </p>
-              </div>
-            ) : (
-            <div className="mt-1 space-y-2">
-              <div className="flex gap-2">
-                <select
-                  value={deployState.pin}
-                  onChange={(e) => setDeployConfig({ pin: e.target.value })}
-                  className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-yellow-500 focus:border-yellow-500"
-                >
-                  <optgroup label="Analog Pins">
-                    {selectedBoard.analog_pins.map((p) => (
-                      <option key={p} value={p}>{p}</option>
-                    ))}
-                  </optgroup>
-                  <optgroup label="Digital Pins">
-                    {selectedBoard.digital_pins.map((p) => (
-                      <option key={p} value={p}>{p}</option>
-                    ))}
-                  </optgroup>
-                </select>
-                <select
-                  value={deployState.pinMode}
-                  onChange={(e) => setDeployConfig({ pinMode: e.target.value })}
-                  className="w-28 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-yellow-500 focus:border-yellow-500"
-                >
-                  <option value="analog">Analog</option>
-                  <option value="digital">Digital</option>
-                  <option value="i2c">I2C</option>
-                </select>
-              </div>
-              <div>
-                <label className="text-xs text-gray-500">Sample Rate (ms)</label>
-                <input
-                  type="number"
-                  value={deployState.sampleRateMs}
-                  onChange={(e) => setDeployConfig({ sampleRateMs: parseInt(e.target.value) || 100 })}
-                  className="mt-0.5 block w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-yellow-500 focus:border-yellow-500"
-                  min={1}
-                  max={10000}
-                />
-              </div>
-            </div>
-            )}
-          </div>
+          <PinConfigurator
+            config={{
+              inputSource: model.sensor || deployState.inputSource || 'analog',
+              pin: deployState.pin,
+              sampleRateMs: deployState.sampleRateMs,
+              imuFeatures: deployState.imuFeatures,
+              i2cAddress: deployState.i2cAddress,
+            }}
+            onChange={(cfg) => setDeployConfig({
+              inputSource: cfg.inputSource,
+              pin: cfg.pin,
+              sampleRateMs: cfg.sampleRateMs,
+              imuFeatures: cfg.imuFeatures,
+              i2cAddress: cfg.i2cAddress,
+            })}
+            board={selectedBoard}
+            boardKey={deployState.boardKey}
+          />
         )}
 
         {/* Compatibility Check */}

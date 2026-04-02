@@ -93,7 +93,7 @@ TfLiteStatus RecognizeCommands::ProcessLatestResults(
   for (int offset = 0; offset < previous_results_.size(); ++offset) {
     PreviousResultsQueue::Result previous_result =
         previous_results_.from_front(offset);
-    const int8_t* scores = previous_result.scores;
+    const int8_t* scores = previous_result.scores_;
     for (int i = 0; i < kCategoryCount; ++i) {
       if (offset == 0) {
         average_scores[i] = scores[i] + 128;

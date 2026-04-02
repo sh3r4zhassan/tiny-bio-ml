@@ -85,14 +85,17 @@ export const useStore = create((set, get) => ({
 
   // --- Deploy Flow ---
   deployState: {
-    step: 'idle', // idle | select-board | configure-pins | compiling | flashing | done | error
+    step: 'idle',
     boardKey: null,
+    inputSource: 'analog',
     pin: 'A0',
-    pinMode: 'analog',
     sampleRateMs: 100,
-    compiledBinary: null,
+    imuFeatures: 3,
+    i2cAddress: '0x68',
+    port: 'COM4',
+    buildId: null,
     error: null,
-    sketch: null, // generated Arduino code (for preview)
+    sketch: null,
   },
 
   setDeployStep: (step) =>
@@ -107,8 +110,10 @@ export const useStore = create((set, get) => ({
         step: 'idle',
         boardKey: null,
         pin: 'A0',
-        pinMode: 'analog',
+        inputSource: 'analog',
         sampleRateMs: 100,
+        imuFeatures: 3,
+        i2cAddress: '0x68',
         port: 'COM4',
         buildId: null,
         error: null,
@@ -129,9 +134,11 @@ export const useStore = create((set, get) => ({
       const formData = new FormData();
       formData.append('model_id', selectedModel.id);
       formData.append('board_key', deployState.boardKey || 'arduino_nano_33_ble');
-      formData.append('pin', deployState.pin);
-      formData.append('pin_mode', deployState.pinMode);
-      formData.append('sample_rate_ms', deployState.sampleRateMs);
+      formData.append('input_source', deployState.inputSource || 'analog');
+      formData.append('pin', deployState.pin || 'A0');
+      formData.append('sample_rate_ms', deployState.sampleRateMs || 100);
+      formData.append('imu_features', deployState.imuFeatures || 3);
+      formData.append('i2c_address', deployState.i2cAddress || '0x68');
 
       const res = await fetch(`${API_BASE}/compile`, {
         method: 'POST',

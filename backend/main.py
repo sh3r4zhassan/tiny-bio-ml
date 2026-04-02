@@ -68,16 +68,37 @@ DB = {
             "title": "Tiny-ECG-Arrhythmia",
             "author": "TinyBioML",
             "task": "Classification",
-            "hardware": "ESP32",
-            "description": "Lightweight arrhythmia detection for single-lead ECG. Optimized for ESP32 with minimal latency.",
+            "hardware": "Arduino Nano 33 BLE",
+            "description": "Lightweight arrhythmia detection for single-lead ECG. Connect an AD8232 or similar ECG sensor to an analog pin.",
             "downloads": 12000,
             "likes": 342,
-            "tags": ["ECG", "Quantized", "int8"],
+            "tags": ["ECG", "Quantized", "int8", "Analog"],
             "updated": datetime.now().isoformat(),
             "stats": {"ram": "15KB", "latency": "12ms", "flash": "45KB"},
             "file": None,
             "input_shape": [1, 128],
             "output_classes": 5,
+            "class_labels": ["Normal", "Afib", "AFlutter", "VTach", "Other"],
+            "sensor": "analog",
+        },
+        {
+            "id": "tbio-imu-gesture-recognition",
+            "slug": "tbio/imu-gesture-recognition",
+            "title": "IMU-Gesture-Recognition",
+            "author": "TinyBioML",
+            "task": "Classification",
+            "hardware": "Arduino Nano 33 BLE",
+            "description": "Recognizes 4 gestures (wave, circle, punch, idle) from the onboard IMU accelerometer + gyroscope.",
+            "downloads": 6800,
+            "likes": 175,
+            "tags": ["IMU", "Gesture", "Accel", "Gyro"],
+            "updated": datetime.now().isoformat(),
+            "stats": {"ram": "12KB", "latency": "25ms", "flash": "35KB"},
+            "file": None,
+            "input_shape": [1, 600],
+            "output_classes": 4,
+            "class_labels": ["wave", "circle", "punch", "idle"],
+            "sensor": "imu",
         },
         {
             "id": "stanford-eeg-sleep-stage-micro",
@@ -85,16 +106,18 @@ DB = {
             "title": "EEG-Sleep-Stage-Micro",
             "author": "Stanford-Wearables",
             "task": "Time-Series",
-            "hardware": "Cortex M4",
-            "description": "5-class sleep staging model compressed for Cortex M4F microcontrollers.",
+            "hardware": "Arduino Nano 33 BLE",
+            "description": "5-class sleep staging from EEG signal. Connect EEG module to analog pin.",
             "downloads": 8500,
             "likes": 120,
-            "tags": ["EEG", "Sleep", "Low-Power"],
+            "tags": ["EEG", "Sleep", "Low-Power", "Analog"],
             "updated": datetime.now().isoformat(),
             "stats": {"ram": "24KB", "latency": "45ms", "flash": "120KB"},
             "file": None,
             "input_shape": [1, 256],
             "output_classes": 5,
+            "class_labels": ["Wake", "N1", "N2", "N3", "REM"],
+            "sensor": "analog",
         },
         {
             "id": "community-ppg-hr-estimator",
@@ -102,16 +125,17 @@ DB = {
             "title": "PPG-HeartRate-Estimator",
             "author": "OpenHealth",
             "task": "Regression",
-            "hardware": "Arduino Nano 33",
-            "description": "Robust heart rate estimation from raw PPG signals with motion artifact cancellation.",
+            "hardware": "Arduino Nano 33 BLE",
+            "description": "Heart rate estimation from PPG signal. Connect MAX30102 via I2C or analog PPG sensor.",
             "downloads": 5000,
             "likes": 89,
-            "tags": ["PPG", "Wearable", "BLE"],
+            "tags": ["PPG", "Wearable", "BLE", "I2C"],
             "updated": datetime.now().isoformat(),
             "stats": {"ram": "8KB", "latency": "8ms", "flash": "32KB"},
             "file": None,
             "input_shape": [1, 64],
             "output_classes": 1,
+            "sensor": "i2c",
         },
         {
             "id": "tbio-emg-gesture-control",
@@ -119,16 +143,18 @@ DB = {
             "title": "EMG-Gesture-Control-Tiny",
             "author": "TinyBioML",
             "task": "Classification",
-            "hardware": "nRF52840",
-            "description": "Recognizes 6 hand gestures from forearm EMG. Ready for BLE streaming.",
+            "hardware": "Arduino Nano 33 BLE",
+            "description": "Recognizes 6 hand gestures from forearm EMG. Connect EMG sensor to analog pin.",
             "downloads": 3200,
             "likes": 210,
-            "tags": ["EMG", "Prosthetics", "Real-time"],
+            "tags": ["EMG", "Prosthetics", "Real-time", "Analog"],
             "updated": datetime.now().isoformat(),
             "stats": {"ram": "18KB", "latency": "15ms", "flash": "50KB"},
             "file": None,
             "input_shape": [1, 128],
             "output_classes": 6,
+            "class_labels": ["fist", "open", "pinch", "wave_in", "wave_out", "rest"],
+            "sensor": "analog",
         },
     ],
     "datasets": [
@@ -353,9 +379,11 @@ def _tflite_to_g_model_cpp(tflite_path):
 async def compile_firmware(
     model_id: str = Form(...),
     board_key: str = Form("arduino_nano_33_ble"),
+    input_source: str = Form("analog"),  # analog, digital, i2c, pdm_microphone, imu
     pin: str = Form("A0"),
-    pin_mode: str = Form("analog"),  # analog, digital, i2c
     sample_rate_ms: int = Form(100),
+    imu_features: int = Form(3),  # 3=accel, 6=accel+gyro
+    i2c_address: str = Form("0x68"),
 ):
     """
     Generates firmware from template, compiles with arduino-cli,
@@ -382,50 +410,78 @@ async def compile_firmware(
     sketch_dir = build_dir / sketch_name
     sketch_dir.mkdir(exist_ok=True)
 
-    if firmware_template_key and (FIRMWARE_DIR / firmware_template_key).is_dir():
-        # Copy the entire pre-built sketch directory
-        src_sketch = FIRMWARE_DIR / firmware_template_key
-        for f in src_sketch.iterdir():
-            if f.is_file():
-                shutil.copy(f, sketch_dir / f.name)
+    if not firmware_template_key or not (FIRMWARE_DIR / firmware_template_key).is_dir():
+        return JSONResponse(status_code=400, content={
+            "error": f"No firmware skeleton found for '{firmware_template_key}'",
+            "message": f"Create backend/firmware/{firmware_template_key}/ with the skeleton .ino and support files.",
+            "available": [d.name for d in FIRMWARE_DIR.iterdir() if d.is_dir()],
+        })
 
-        # If the user has a custom model file, swap in the model data
-        model_file = model.get("file")
-        if model_file and os.path.exists(model_file):
-            model_cpp = _tflite_to_g_model_cpp(model_file)
-            with open(sketch_dir / "micro_features_model.cpp", "w") as fw:
-                fw.write(model_cpp)
+    # --- Step 1: Copy skeleton (fixed files) ---
+    src_sketch = FIRMWARE_DIR / firmware_template_key
+    for f in src_sketch.iterdir():
+        if f.is_file():
+            shutil.copy(f, sketch_dir / f.name)
 
-        # Read .ino for error reporting
-        ino_files = list(sketch_dir.glob("*.ino"))
-        if ino_files:
-            with open(ino_files[0]) as f:
-                firmware_code = f.read()
+    # --- Step 2: Generate micro_features_model.cpp from .tflite ---
+    model_file = model.get("file")
+    if model_file and os.path.exists(model_file):
+        model_cpp = _tflite_to_g_model_cpp(model_file)
     else:
-        # Generic firmware from Jinja2 template
-        from jinja2 import Environment, FileSystemLoader
-        env = Environment(loader=FileSystemLoader(str(TEMPLATES_DIR)))
-        template = env.get_template("firmware_tflite.ino.j2")
-        firmware_code = template.render(
-            model_name=model["title"],
-            pin=pin,
-            pin_mode=pin_mode,
-            sample_rate_ms=sample_rate_ms,
-            num_classes=model.get("output_classes", 2),
-            input_size=model.get("input_shape", [1, 128])[-1] if model.get("input_shape") else 128,
-            board_name=board["name"],
-        )
-        with open(sketch_dir / f"{sketch_name}.ino", "w") as fw:
-            fw.write(firmware_code)
+        model_cpp = _generate_dummy_model_header()
+    with open(sketch_dir / "micro_features_model.cpp", "w") as fw:
+        fw.write(model_cpp)
 
-        # Generate model_data.h for generic firmware
-        model_file = model.get("file")
-        if model_file and os.path.exists(model_file):
-            model_header = _tflite_to_c_header(model_file)  # placeholder
-        else:
-            model_header = _generate_dummy_model_header()
-        with open(sketch_dir / "model_data.h", "w") as fw:
-            fw.write(model_header)
+    # --- Step 3: Generate pin_config.h ---
+    from jinja2 import Environment, FileSystemLoader
+    env = Environment(loader=FileSystemLoader(str(TEMPLATES_DIR)))
+    pin_template = env.get_template("pin_config.h.j2")
+
+    # Map frontend input_source to template variable
+    source_map = {
+        'pdm_microphone': 'pdm_mic',
+        'analog': 'analog',
+        'digital': 'digital',
+        'imu': 'imu',
+        'i2c': 'i2c',
+    }
+
+    pin_config = pin_template.render(
+        board_name=board["name"],
+        mcu=board["mcu"],
+        model_name=model["title"],
+        timestamp=datetime.now().isoformat(),
+        serial_baud=115200,
+        json_output=True,
+        # Input source
+        input_source=source_map.get(input_source, input_source),
+        # Mic
+        mic_use_default=True,
+        mic_gain=20,
+        # Analog
+        analog_pin=pin,
+        sample_rate_ms=sample_rate_ms,
+        analog_max=4095 if "esp32" in board_key else 1023,
+        # IMU
+        imu_use_default=True,
+        imu_axes=imu_features,
+        # I2C
+        i2c_address=i2c_address,
+        i2c_sda=board.get("i2c_pins", {}).get("sda", "A4"),
+        i2c_scl=board.get("i2c_pins", {}).get("scl", "A5"),
+        # LEDs (defaults for Nano 33 BLE)
+        output_pins=[],
+    )
+    with open(sketch_dir / "pin_config.h", "w") as fw:
+        fw.write(pin_config)
+
+    firmware_code = pin_config  # Show in error UI
+
+    # Read .ino name for reference
+    ino_files = list(sketch_dir.glob("*.ino"))
+    if ino_files:
+        with open(ino_files[0]) as f:
+            firmware_code = f.read()[:3000]
 
     # --- Step 2: Compile with arduino-cli ---
     output_dir = build_dir / "output"
