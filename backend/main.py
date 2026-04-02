@@ -421,7 +421,7 @@ async def compile_firmware(
         # Generate model_data.h for generic firmware
         model_file = model.get("file")
         if model_file and os.path.exists(model_file):
-            model_header = _generate_dummy_model_header()  # placeholder
+            model_header = _tflite_to_c_header(model_file)  # placeholder
         else:
             model_header = _generate_dummy_model_header()
         with open(sketch_dir / "model_data.h", "w") as fw:

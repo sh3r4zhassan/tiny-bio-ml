@@ -266,10 +266,18 @@ const ModelDetail = ({ model, onBack, serial, deployState, boards }) => {
 // DEPLOY PANEL (right sidebar on model detail)
 // ==================================================================
 const DeployPanel = ({ model, deployState, boards, selectedBoard, optimizeResult, serial }) => {
-  const { setDeployConfig, setDeployStep, compile } = useStore();
+  const { setDeployConfig, setDeployStep, compile, flash } = useStore();
 
-  const handleCompileAndFlash = async () => {
+  const handleCompile = async () => {
     await compile();
+  };
+
+  const handleFlash = async () => {
+    // Disconnect serial first — port must be free for flashing
+    if (serial.isConnected) {
+      await serial.disconnect();
+    }
+    await flash();
   };
 
   return (
@@ -332,12 +340,27 @@ const DeployPanel = ({ model, deployState, boards, selectedBoard, optimizeResult
           </select>
         </div>
 
-        {/* Step 3: Pin Configuration */}
+        {/* Step 3: Pin Configuration or Sensor Info */}
         {selectedBoard && (
           <div>
             <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
-              3. Pin Configuration
+              3. Sensor / Pin Configuration
             </label>
+            {model.sensor === 'pdm_microphone' ? (
+              <div className="mt-1 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
+                <div className="flex items-center gap-2 font-medium">
+                  <Radio className="w-4 h-4" /> Onboard PDM Microphone
+                </div>
+                <p className="text-xs text-blue-600 mt-1">
+                  This model uses the built-in microphone — no wiring needed.
+                  {model.class_labels && (
+                    <span className="block mt-1">
+                      Detects: {model.class_labels.filter(l => l !== 'silence' && l !== 'unknown').join(', ')}
+                    </span>
+                  )}
+                </p>
+              </div>
+            ) : (
             <div className="mt-1 space-y-2">
               <div className="flex gap-2">
                 <select
@@ -378,6 +401,7 @@ const DeployPanel = ({ model, deployState, boards, selectedBoard, optimizeResult
                 />
               </div>
             </div>
+            )}
           </div>
         )}
 
@@ -409,31 +433,78 @@ const DeployPanel = ({ model, deployState, boards, selectedBoard, optimizeResult
           </div>
         )}
 
-        {/* Deploy Button */}
+        {/* Step 1: Compile */}
         <button
-          onClick={handleCompileAndFlash}
-          disabled={!serial.isConnected || !deployState.boardKey || deployState.step === 'compiling'}
+          onClick={handleCompile}
+          disabled={!deployState.boardKey || deployState.step === 'compiling' || deployState.step === 'compiled' || deployState.step === 'flashing' || deployState.step === 'done'}
           className={`w-full py-3 rounded-lg font-semibold text-sm flex items-center justify-center gap-2 transition-all ${
-            serial.isConnected && deployState.boardKey
+            deployState.boardKey && deployState.step !== 'compiled' && deployState.step !== 'done'
               ? 'bg-yellow-400 text-gray-900 hover:bg-yellow-500 shadow-sm'
+              : deployState.step === 'compiled' || deployState.step === 'done'
+              ? 'bg-green-100 text-green-700 border border-green-200'
               : 'bg-gray-100 text-gray-400 cursor-not-allowed'
           }`}
         >
           {deployState.step === 'compiling' ? (
             <><Loader2 className="w-4 h-4 animate-spin" /> Compiling firmware...</>
-          ) : deployState.step === 'flashing' ? (
-            <><Loader2 className="w-4 h-4 animate-spin" /> Flashing to device...</>
-          ) : deployState.step === 'done' ? (
-            <><Check className="w-4 h-4" /> Deployed!</>
+          ) : deployState.step === 'compiled' || deployState.step === 'flashing' || deployState.step === 'done' ? (
+            <><Check className="w-4 h-4" /> Compiled</>
           ) : (
-            <><Zap className="w-4 h-4" /> Compile &amp; Flash</>
+            <><Zap className="w-4 h-4" /> Compile Firmware</>
           )}
         </button>
 
+        {/* Step 2: Port + Flash (shown after compile succeeds) */}
+        {(deployState.step === 'compiled' || deployState.step === 'flashing' || deployState.step === 'done') && (
+          <div className="space-y-2">
+            <div>
+              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                Port
+              </label>
+              <input
+                type="text"
+                value={deployState.port || 'COM4'}
+                onChange={(e) => setDeployConfig({ port: e.target.value })}
+                placeholder="COM4"
+                className="mt-1 block w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-yellow-500 focus:border-yellow-500"
+              />
+              <p className="text-[10px] text-gray-400 mt-1">
+                Check with: arduino-cli board list
+              </p>
+            </div>
+
+            {serial.isConnected && (
+              <div className="p-2 bg-orange-50 border border-orange-200 rounded-lg text-xs text-orange-700">
+                ⚠ Serial monitor will disconnect during flash — this is normal.
+              </div>
+            )}
+
+            <button
+              onClick={handleFlash}
+              disabled={deployState.step === 'flashing' || deployState.step === 'done'}
+              className={`w-full py-3 rounded-lg font-semibold text-sm flex items-center justify-center gap-2 transition-all ${
+                deployState.step === 'done'
+                  ? 'bg-green-500 text-white'
+                  : deployState.step === 'flashing'
+                  ? 'bg-gray-100 text-gray-400'
+                  : 'bg-gray-900 text-white hover:bg-gray-800 shadow-sm'
+              }`}
+            >
+              {deployState.step === 'flashing' ? (
+                <><Loader2 className="w-4 h-4 animate-spin" /> Flashing to device...</>
+              ) : deployState.step === 'done' ? (
+                <><Check className="w-4 h-4" /> Deployed! Reconnect serial to see output.</>
+              ) : (
+                <><Upload className="w-4 h-4" /> Flash to Device</>
+              )}
+            </button>
+          </div>
+        )}
+
         {/* Error display */}
         {deployState.step === 'error' && (
-          <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">
-            <div className="font-semibold mb-1">Build Error</div>
+          <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 whitespace-pre-wrap">
+            <div className="font-semibold mb-1">Error</div>
             {deployState.error}
             {deployState.sketch && (
               <details className="mt-2">
@@ -506,15 +577,33 @@ const SerialMonitor = ({ serial }) => {
             {entry.parsed ? (
               <div className="text-green-400">
                 <span className="text-gray-600">[{new Date(entry.timestamp).toLocaleTimeString()}]</span>{' '}
-                {entry.parsed.class !== undefined && (
+                {entry.parsed.label !== undefined && (
+                  <>
+                    <span className={`font-bold px-1.5 py-0.5 rounded text-xs ${
+                      entry.parsed.label === 'silence' || entry.parsed.label === 'unknown'
+                        ? 'bg-gray-700 text-gray-400'
+                        : 'bg-yellow-500/20 text-yellow-300'
+                    }`}>
+                      {entry.parsed.label.toUpperCase()}
+                    </span>{' '}
+                    <span className="text-cyan-400">{(entry.parsed.confidence * 100).toFixed(1)}%</span>{' '}
+                  </>
+                )}
+                {entry.parsed.label === undefined && entry.parsed.class !== undefined && (
                   <>class: <span className="text-yellow-400 font-bold">{entry.parsed.class}</span>{' '}
                   conf: <span className="text-cyan-400">{(entry.parsed.confidence * 100).toFixed(1)}%</span>{' '}</>
                 )}
                 {entry.parsed.value !== undefined && (
                   <>value: <span className="text-yellow-400 font-bold">{entry.parsed.value}</span>{' '}</>
                 )}
-                {entry.parsed.latency_us !== undefined && (
+                {entry.parsed.infer_us !== undefined && (
+                  <span className="text-gray-500">{(entry.parsed.infer_us / 1000).toFixed(1)}ms</span>
+                )}
+                {entry.parsed.infer_us === undefined && entry.parsed.latency_us !== undefined && (
                   <span className="text-gray-500">{entry.parsed.latency_us}μs</span>
+                )}
+                {entry.parsed.status && (
+                  <span className="text-blue-400">[{entry.parsed.status}] {entry.parsed.msg}</span>
                 )}
               </div>
             ) : (
@@ -848,6 +937,21 @@ export default function App() {
 // FALLBACK MOCK DATA (used if backend isn't running)
 // ==================================================================
 const MOCK_MODELS = [
+  {
+    id: "tbio-kws-yes-no-v1",
+    slug: "tbio/kws-yes-no-v1",
+    title: "KWS-Yes-No",
+    author: "TinyBioML",
+    task: "Audio Classification",
+    hardware: "Arduino Nano 33 BLE",
+    description: "Keyword spotting model detecting 'yes' and 'no' from microphone audio. Uses micro_speech feature pipeline. Int8 quantized, 18KB.",
+    downloads: 0, likes: 0,
+    tags: ["Audio", "Keywords", "int8", "PDM-Mic"],
+    updated: "just now",
+    stats: { ram: "10KB", latency: "~100ms", flash: "18KB" },
+    sensor: "pdm_microphone",
+    class_labels: ["silence", "unknown", "yes", "no"],
+  },
   {
     id: "tbio-tiny-ecg-arrhythmia-v1",
     slug: "tbio/tiny-ecg-arrhythmia-v1",

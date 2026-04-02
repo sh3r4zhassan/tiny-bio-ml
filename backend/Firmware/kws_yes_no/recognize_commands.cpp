@@ -1,7 +1,20 @@
 /* Copyright 2017 The TensorFlow Authors. All Rights Reserved.
-Licensed under the Apache License, Version 2.0. */
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+==============================================================================*/
 
 #include "recognize_commands.h"
+
 #include <limits>
 
 RecognizeCommands::RecognizeCommands(tflite::ErrorReporter* error_reporter,
@@ -10,13 +23,14 @@ RecognizeCommands::RecognizeCommands(tflite::ErrorReporter* error_reporter,
                                      int32_t suppression_ms,
                                      int32_t minimum_count)
     : error_reporter_(error_reporter),
-      previous_results_count_(0),
       average_window_duration_ms_(average_window_duration_ms),
       detection_threshold_(detection_threshold),
       suppression_ms_(suppression_ms),
       minimum_count_(minimum_count),
-      previous_top_label_("silence"),
-      previous_top_label_time_(0) {}
+      previous_results_(error_reporter) {
+  previous_top_label_ = "silence";
+  previous_top_label_time_ = std::numeric_limits<int32_t>::min();
+}
 
 TfLiteStatus RecognizeCommands::ProcessLatestResults(
     const TfLiteTensor* latest_results, const int32_t current_time_ms,
@@ -27,7 +41,7 @@ TfLiteStatus RecognizeCommands::ProcessLatestResults(
     TF_LITE_REPORT_ERROR(
         error_reporter_,
         "The results for recognition should contain %d elements, but there are "
-        "%d in an ideally %d-dimensional tensor",
+        "%d in an %d-dimensional shape",
         kCategoryCount, latest_results->dims->data[1],
         latest_results->dims->size);
     return kTfLiteError;
@@ -36,51 +50,37 @@ TfLiteStatus RecognizeCommands::ProcessLatestResults(
   if (latest_results->type != kTfLiteInt8) {
     TF_LITE_REPORT_ERROR(
         error_reporter_,
-        "The results for recognition should be int8 elements, but are %d",
+        "The results for recognition should be int8_t elements, but are %d",
         latest_results->type);
     return kTfLiteError;
   }
 
-  if ((!previous_results_count_) ||
-      (current_time_ms <
-       previous_results_[previous_results_count_ - 1].time_)) {
-    previous_results_count_ = 0;
+  if ((!previous_results_.empty()) &&
+      (current_time_ms < previous_results_.front().time_)) {
+    TF_LITE_REPORT_ERROR(
+        error_reporter_,
+        "Results must be fed in increasing time order, but received a "
+        "timestamp of %d that was earlier than the previous one of %d",
+        current_time_ms, previous_results_.front().time_);
+    return kTfLiteError;
   }
 
   // Add the latest results to the head of the queue.
-  if (previous_results_count_ < kMaxResults) {
-    PreviousResultsEntry& entry =
-        previous_results_[previous_results_count_];
-    entry.time_ = current_time_ms;
-    for (int i = 0; i < kCategoryCount; ++i) {
-      entry.scores_[i] = latest_results->data.int8[i];
-    }
-    ++previous_results_count_;
-  }
+  previous_results_.push_back({current_time_ms, latest_results->data.int8});
 
   // Prune any earlier results that are too old for the averaging window.
   const int64_t time_limit = current_time_ms - average_window_duration_ms_;
-  int how_many_to_drop = 0;
-  for (int i = 0; i < previous_results_count_; ++i) {
-    if (previous_results_[i].time_ < time_limit) {
-      how_many_to_drop++;
-    } else {
-      break;
-    }
-  }
-  if (how_many_to_drop > 0) {
-    for (int i = how_many_to_drop; i < previous_results_count_; ++i) {
-      previous_results_[i - how_many_to_drop] = previous_results_[i];
-    }
-    previous_results_count_ -= how_many_to_drop;
+  while ((!previous_results_.empty()) &&
+         previous_results_.front().time_ < time_limit) {
+    previous_results_.pop_front();
   }
 
-  // If there are too few results, assume the result is unreliable and
+  // If there are too few results, assume the result will be unreliable and
   // bail.
-  const int64_t earliest_time =
-      previous_results_[0].time_;
+  const int64_t how_many_results = previous_results_.size();
+  const int64_t earliest_time = previous_results_.front().time_;
   const int64_t samples_duration = current_time_ms - earliest_time;
-  if ((previous_results_count_ < minimum_count_) ||
+  if ((how_many_results < minimum_count_) ||
       (samples_duration < (average_window_duration_ms_ / 4))) {
     *found_command = previous_top_label_;
     *score = 0;
@@ -90,13 +90,20 @@ TfLiteStatus RecognizeCommands::ProcessLatestResults(
 
   // Calculate the average score across all the results in the window.
   int32_t average_scores[kCategoryCount];
-  for (int offset = 0; offset < kCategoryCount; ++offset) {
-    int64_t total = 0;
-    for (int i = 0; i < previous_results_count_; ++i) {
-      total += previous_results_[i].scores_[offset];
+  for (int offset = 0; offset < previous_results_.size(); ++offset) {
+    PreviousResultsQueue::Result previous_result =
+        previous_results_.from_front(offset);
+    const int8_t* scores = previous_result.scores;
+    for (int i = 0; i < kCategoryCount; ++i) {
+      if (offset == 0) {
+        average_scores[i] = scores[i] + 128;
+      } else {
+        average_scores[i] += scores[i] + 128;
+      }
     }
-    average_scores[offset] =
-        static_cast<int32_t>(total / previous_results_count_);
+  }
+  for (int i = 0; i < kCategoryCount; ++i) {
+    average_scores[i] /= how_many_results;
   }
 
   // Find the current highest scoring category.

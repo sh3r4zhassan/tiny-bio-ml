@@ -41,7 +41,33 @@ export const useStore = create((set, get) => ({
   },
 
   // --- Boards ---
-  boards: {},
+  boards: {
+    // Fallback board data — used if backend is not running
+    "arduino_nano_33_ble": {
+      name: "Arduino Nano 33 BLE Sense",
+      fqbn: "arduino:mbed_nano:nano33ble",
+      mcu: "nRF52840 (Cortex-M4F)",
+      flash_kb: 1024,
+      ram_kb: 256,
+      analog_pins: ["A0", "A1", "A2", "A3", "A4", "A5", "A6", "A7"],
+      digital_pins: ["D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10", "D11", "D12", "D13"],
+      i2c_pins: { sda: "A4", scl: "A5" },
+      spi_pins: { mosi: "D11", miso: "D12", sck: "D13", cs: "D10" },
+      flash_protocol: "bossa",
+    },
+    "esp32": {
+      name: "ESP32 DevKit",
+      fqbn: "esp32:esp32:esp32",
+      mcu: "Xtensa LX6",
+      flash_kb: 4096,
+      ram_kb: 520,
+      analog_pins: ["GPIO32", "GPIO33", "GPIO34", "GPIO35", "GPIO36", "GPIO39"],
+      digital_pins: ["GPIO2", "GPIO4", "GPIO5", "GPIO12", "GPIO13", "GPIO14", "GPIO15"],
+      i2c_pins: { sda: "GPIO21", scl: "GPIO22" },
+      spi_pins: { mosi: "GPIO23", miso: "GPIO19", sck: "GPIO18", cs: "GPIO5" },
+      flash_protocol: "esptool",
+    },
+  },
   
   fetchBoards: async () => {
     try {
@@ -83,7 +109,8 @@ export const useStore = create((set, get) => ({
         pin: 'A0',
         pinMode: 'analog',
         sampleRateMs: 100,
-        compiledBinary: null,
+        port: 'COM4',
+        buildId: null,
         error: null,
         sketch: null,
       },
@@ -111,24 +138,77 @@ export const useStore = create((set, get) => ({
         body: formData,
       });
 
-      if (res.ok) {
-        const blob = await res.blob();
+      const data = await res.json();
+
+      if (res.ok && data.status === 'compiled') {
         set((s) => ({
           deployState: {
             ...s.deployState,
-            step: 'flashing',
-            compiledBinary: blob,
+            step: 'compiled',
+            buildId: data.build_id,
+            error: null,
           },
         }));
       } else {
-        const errData = await res.json();
+        const fullError = [
+          data.error || 'Compilation failed',
+          data.details ? `\n--- stderr ---\n${data.details}` : '',
+          data.stdout ? `\n--- stdout ---\n${data.stdout}` : '',
+        ].join('');
         set((s) => ({
           deployState: {
             ...s.deployState,
             step: 'error',
-            error: errData.error || 'Compilation failed',
-            sketch: errData.sketch || null,
+            error: fullError,
+            sketch: data.sketch || null,
           },
+        }));
+      }
+    } catch (err) {
+      set((s) => ({
+        deployState: {
+          ...s.deployState,
+          step: 'error',
+          error: `Network error: ${err.message}`,
+        },
+      }));
+    }
+  },
+
+  // --- Flash ---
+  flash: async () => {
+    const { deployState } = get();
+    if (!deployState.buildId) return;
+
+    set((s) => ({
+      deployState: { ...s.deployState, step: 'flashing', error: null },
+    }));
+
+    try {
+      const formData = new FormData();
+      formData.append('build_id', deployState.buildId);
+      formData.append('board_key', deployState.boardKey || 'arduino_nano_33_ble');
+      formData.append('port', deployState.port || 'COM4');
+
+      const res = await fetch(`${API_BASE}/flash`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await res.json();
+
+      if (res.ok && data.status === 'flashed') {
+        set((s) => ({
+          deployState: { ...s.deployState, step: 'done' },
+        }));
+      } else {
+        const fullError = [
+          data.error || 'Flash failed',
+          data.details ? `\n${data.details}` : '',
+          data.hint ? `\nHint: ${data.hint}` : '',
+        ].join('');
+        set((s) => ({
+          deployState: { ...s.deployState, step: 'error', error: fullError },
         }));
       }
     } catch (err) {
