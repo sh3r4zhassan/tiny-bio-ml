@@ -43,42 +43,76 @@ for d in [MODELS_DIR, DATASETS_DIR, BUILDS_DIR]:
 DB = {
     "models": [
         {
-            "id": "tbio-kws-yes-no-v1",
-            "slug": "tbio/kws-yes-no-v1",
-            "title": "KWS-Yes-No",
+            "id": "tbio-kws-yes-no",
+            "slug": "tbio/kws-yes-no",
+            "title": "Keyword Spotting",
             "author": "TinyBioML",
             "task": "Audio Classification",
-            "hardware": "Arduino Nano 33 BLE",
-            "description": "Keyword spotting model detecting 'yes' and 'no' from microphone audio. Uses micro_speech feature pipeline (40 filterbank bins). Int8 quantized, 18KB.",
+            "description": "Real-time keyword detection from microphone audio. Detects 'yes' and 'no' commands using a DS-CNN on 40-bin log-mel filterbank features. Designed for always-on voice interfaces on battery-powered biomedical wearables.",
             "downloads": 0,
             "likes": 0,
             "tags": ["Audio", "Keywords", "int8", "PDM-Mic", "Speech-Commands"],
             "updated": datetime.now().isoformat(),
-            "stats": {"ram": "10KB", "latency": "~100ms", "flash": "18KB"},
             "file": str(MODELS_DIR / "KWS_yes_no.tflite"),
-            "input_shape": [1, 1960],
-            "output_classes": 4,
-            "class_labels": ["silence", "unknown", "yes", "no"],
-            "sensor": "pdm_microphone",
             "firmware_template": "kws_yes_no",
+            # --- Model Details ---
+            "details": {
+                "architecture": "DS-CNN (Depthwise Separable CNN)",
+                "framework": "TensorFlow Lite Micro",
+                "quantization": "int8 (post-training)",
+                "dataset": "Google Speech Commands v0.02",
+                "accuracy": "92.3%",
+                "input_type": "Audio (PDM Microphone → 40-bin filterbank)",
+                "input_shape": [1, 1960],
+                "input_format": "int8 spectrogram features (49 frames × 40 bins)",
+                "output_type": "Classification (4 classes)",
+                "output_classes": 4,
+                "class_labels": ["silence", "unknown", "yes", "no"],
+                "sample_rate": "16 kHz",
+                "inference_window": "1 second",
+                "parameters": "~20K",
+                "compatible_mcus": ["nrf52840", "esp32"],
+            },
+            "stats": {
+                "flash": "18KB",
+                "ram": "10KB",
+            },
+            "sensor": "pdm_microphone",
         },
         {
             "id": "tbio-tiny-ecg-arrhythmia-v1",
             "slug": "tbio/tiny-ecg-arrhythmia-v1",
             "title": "Tiny-ECG-Arrhythmia",
             "author": "TinyBioML",
-            "task": "Classification",
-            "hardware": "Arduino Nano 33 BLE",
+            "task": "ECG Classification",
             "description": "Lightweight arrhythmia detection for single-lead ECG. Connect an AD8232 or similar ECG sensor to an analog pin.",
             "downloads": 12000,
             "likes": 342,
             "tags": ["ECG", "Quantized", "int8", "Analog"],
             "updated": datetime.now().isoformat(),
-            "stats": {"ram": "15KB", "latency": "12ms", "flash": "45KB"},
             "file": None,
-            "input_shape": [1, 128],
-            "output_classes": 5,
-            "class_labels": ["Normal", "Afib", "AFlutter", "VTach", "Other"],
+            "firmware_template": None,
+            "details": {
+                "architecture": "1D-CNN",
+                "framework": "TensorFlow Lite Micro",
+                "quantization": "int8 (post-training)",
+                "dataset": "MIT-BIH Arrhythmia Database",
+                "accuracy": "96.1%",
+                "input_type": "Analog sensor (ECG lead, e.g. AD8232)",
+                "input_shape": [1, 128],
+                "input_format": "int8 normalized ECG samples (128 points @ 360Hz)",
+                "output_type": "Classification (5 classes)",
+                "output_classes": 5,
+                "class_labels": ["Normal", "Afib", "AFlutter", "VTach", "Other"],
+                "sample_rate": "360 Hz",
+                "inference_window": "~350ms",
+                "parameters": "~8K",
+                "compatible_mcus": ["nrf52840", "esp32", "atmega328p"],
+            },
+            "stats": {
+                "flash": "45KB",
+                "ram": "15KB",
+            },
             "sensor": "analog",
         },
         {
@@ -86,55 +120,71 @@ DB = {
             "slug": "tbio/imu-gesture-recognition",
             "title": "IMU-Gesture-Recognition",
             "author": "TinyBioML",
-            "task": "Classification",
-            "hardware": "Arduino Nano 33 BLE",
-            "description": "Recognizes 4 gestures (wave, circle, punch, idle) from the onboard IMU accelerometer + gyroscope.",
+            "task": "Gesture Classification",
+            "description": "Recognizes 4 gestures from onboard IMU accelerometer + gyroscope.",
             "downloads": 6800,
             "likes": 175,
             "tags": ["IMU", "Gesture", "Accel", "Gyro"],
             "updated": datetime.now().isoformat(),
-            "stats": {"ram": "12KB", "latency": "25ms", "flash": "35KB"},
             "file": None,
-            "input_shape": [1, 600],
-            "output_classes": 4,
-            "class_labels": ["wave", "circle", "punch", "idle"],
+            "firmware_template": None,
+            "details": {
+                "architecture": "1D-CNN + Dense",
+                "framework": "TensorFlow Lite Micro",
+                "quantization": "int8 (post-training)",
+                "dataset": "Custom gesture dataset (500 samples/class)",
+                "accuracy": "94.7%",
+                "input_type": "IMU (Accelerometer + Gyroscope)",
+                "input_shape": [1, 600],
+                "input_format": "float32 IMU readings (100 samples × 6 axes)",
+                "output_type": "Classification (4 classes)",
+                "output_classes": 4,
+                "class_labels": ["wave", "circle", "punch", "idle"],
+                "sample_rate": "100 Hz (10ms per sample)",
+                "inference_window": "1 second",
+                "parameters": "~12K",
+                "compatible_mcus": ["nrf52840"],
+            },
+            "stats": {
+                "flash": "35KB",
+                "ram": "12KB",
+            },
             "sensor": "imu",
-        },
-        {
-            "id": "stanford-eeg-sleep-stage-micro",
-            "slug": "stanford-lab/eeg-sleep-stage-micro",
-            "title": "EEG-Sleep-Stage-Micro",
-            "author": "Stanford-Wearables",
-            "task": "Time-Series",
-            "hardware": "Arduino Nano 33 BLE",
-            "description": "5-class sleep staging from EEG signal. Connect EEG module to analog pin.",
-            "downloads": 8500,
-            "likes": 120,
-            "tags": ["EEG", "Sleep", "Low-Power", "Analog"],
-            "updated": datetime.now().isoformat(),
-            "stats": {"ram": "24KB", "latency": "45ms", "flash": "120KB"},
-            "file": None,
-            "input_shape": [1, 256],
-            "output_classes": 5,
-            "class_labels": ["Wake", "N1", "N2", "N3", "REM"],
-            "sensor": "analog",
         },
         {
             "id": "community-ppg-hr-estimator",
             "slug": "community/ppg-hr-estimator",
             "title": "PPG-HeartRate-Estimator",
             "author": "OpenHealth",
-            "task": "Regression",
-            "hardware": "Arduino Nano 33 BLE",
-            "description": "Heart rate estimation from PPG signal. Connect MAX30102 via I2C or analog PPG sensor.",
+            "task": "Heart Rate Regression",
+            "description": "Heart rate estimation from PPG signal. Connect MAX30102 via I2C.",
             "downloads": 5000,
             "likes": 89,
             "tags": ["PPG", "Wearable", "BLE", "I2C"],
             "updated": datetime.now().isoformat(),
-            "stats": {"ram": "8KB", "latency": "8ms", "flash": "32KB"},
             "file": None,
-            "input_shape": [1, 64],
-            "output_classes": 1,
+            "firmware_template": None,
+            "details": {
+                "architecture": "LSTM-Tiny",
+                "framework": "TensorFlow Lite Micro",
+                "quantization": "int8 (post-training)",
+                "dataset": "TROIKA PPG Dataset",
+                "accuracy": "MAE: 2.3 BPM",
+                "input_type": "I2C sensor (MAX30102 PPG)",
+                "input_shape": [1, 64],
+                "input_format": "int8 normalized PPG readings (64 samples)",
+                "output_type": "Regression (BPM value)",
+                "output_classes": 1,
+                "class_labels": None,
+                "sample_rate": "100 Hz",
+                "inference_window": "640ms",
+                "parameters": "~5K",
+                "compatible_mcus": ["nrf52840", "esp32"],
+            },
+            "stats": {
+                "flash": "32KB",
+                "ram": "8KB",
+            },
             "sensor": "i2c",
         },
         {
@@ -142,18 +192,35 @@ DB = {
             "slug": "tbio/emg-gesture-control",
             "title": "EMG-Gesture-Control-Tiny",
             "author": "TinyBioML",
-            "task": "Classification",
-            "hardware": "Arduino Nano 33 BLE",
+            "task": "EMG Classification",
             "description": "Recognizes 6 hand gestures from forearm EMG. Connect EMG sensor to analog pin.",
             "downloads": 3200,
             "likes": 210,
             "tags": ["EMG", "Prosthetics", "Real-time", "Analog"],
             "updated": datetime.now().isoformat(),
-            "stats": {"ram": "18KB", "latency": "15ms", "flash": "50KB"},
             "file": None,
-            "input_shape": [1, 128],
-            "output_classes": 6,
-            "class_labels": ["fist", "open", "pinch", "wave_in", "wave_out", "rest"],
+            "firmware_template": None,
+            "details": {
+                "architecture": "DS-CNN",
+                "framework": "TensorFlow Lite Micro",
+                "quantization": "int8 (post-training)",
+                "dataset": "NinaPro DB5 (subset)",
+                "accuracy": "88.5%",
+                "input_type": "Analog sensor (sEMG electrode)",
+                "input_shape": [1, 128],
+                "input_format": "int8 normalized EMG samples (128 points @ 1kHz)",
+                "output_type": "Classification (6 classes)",
+                "output_classes": 6,
+                "class_labels": ["fist", "open", "pinch", "wave_in", "wave_out", "rest"],
+                "sample_rate": "1 kHz",
+                "inference_window": "128ms",
+                "parameters": "~15K",
+                "compatible_mcus": ["nrf52840", "esp32"],
+            },
+            "stats": {
+                "flash": "50KB",
+                "ram": "18KB",
+            },
             "sensor": "analog",
         },
     ],
@@ -183,45 +250,128 @@ DB = {
     ],
 }
 
-# --- Board Registry ---
-BOARDS = {
-    "arduino_nano_33_ble": {
-        "name": "Arduino Nano 33 BLE Sense",
-        "fqbn": "arduino:mbed_nano:nano33ble",
-        "mcu": "nRF52840 (Cortex-M4F)",
+# --- MCU & Board Registry ---
+# Hierarchy: MCU → Board presets → Pin defaults
+MCUS = {
+    "nrf52840": {
+        "name": "nRF52840 (Cortex-M4F)",
+        "arch": "arm",
         "flash_kb": 1024,
         "ram_kb": 256,
-        "analog_pins": ["A0", "A1", "A2", "A3", "A4", "A5", "A6", "A7"],
-        "digital_pins": ["D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10", "D11", "D12", "D13"],
-        "i2c_pins": {"sda": "A4", "scl": "A5"},
-        "spi_pins": {"mosi": "D11", "miso": "D12", "sck": "D13", "cs": "D10"},
-        "flash_protocol": "bossa",
+        "boards": {
+            "nano_33_ble": {
+                "name": "Arduino Nano 33 BLE Sense",
+                "fqbn": "arduino:mbed_nano:nano33ble",
+                "flash_protocol": "bossa",
+                "onboard": ["pdm_mic", "imu_lsm9ds1", "temp_hts221", "pressure_lps22hb", "light_apds9960"],
+                "defaults": {
+                    "mic": "onboard_pdm",
+                    "imu": "onboard_lsm9ds1",
+                    "led_class_0": "LEDR",
+                    "led_class_1": "LEDG",
+                    "led_class_2": "LEDB",
+                    "mic_gain": 20,
+                },
+                "pins": {
+                    "analog": ["A0", "A1", "A2", "A3", "A4", "A5", "A6", "A7"],
+                    "digital": ["D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10", "D11", "D12", "D13"],
+                    "i2c": {"sda": "A4", "scl": "A5"},
+                },
+            },
+            "xiao_ble_sense": {
+                "name": "Seeed XIAO BLE Sense",
+                "fqbn": "Seeeduino:mbed:xiaoBLE",
+                "flash_protocol": "bossa",
+                "onboard": ["pdm_mic", "imu_lsm6ds3"],
+                "defaults": {
+                    "mic": "onboard_pdm",
+                    "imu": "onboard_lsm6ds3",
+                    "led_class_0": "LED_RED",
+                    "led_class_1": "LED_GREEN",
+                    "led_class_2": "LED_BLUE",
+                    "mic_gain": 20,
+                },
+                "pins": {
+                    "analog": ["A0", "A1", "A2", "A3", "A4", "A5"],
+                    "digital": ["D0", "D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10"],
+                    "i2c": {"sda": "D4", "scl": "D5"},
+                },
+            },
+            "custom_nrf52840": {
+                "name": "Custom nRF52840 Board",
+                "fqbn": "arduino:mbed_nano:nano33ble",  # default FQBN, user may override
+                "flash_protocol": "bossa",
+                "onboard": [],
+                "defaults": {},
+                "pins": {
+                    "analog": ["A0", "A1", "A2", "A3", "A4", "A5", "A6", "A7"],
+                    "digital": ["D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10", "D11", "D12", "D13"],
+                    "i2c": {"sda": "A4", "scl": "A5"},
+                },
+            },
+        },
     },
-    "arduino_nano_classic": {
-        "name": "Arduino Nano (ATmega328P)",
-        "fqbn": "arduino:avr:nano",
-        "mcu": "ATmega328P",
+    "atmega328p": {
+        "name": "ATmega328P",
+        "arch": "avr",
         "flash_kb": 32,
         "ram_kb": 2,
-        "analog_pins": ["A0", "A1", "A2", "A3", "A4", "A5", "A6", "A7"],
-        "digital_pins": ["D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10", "D11", "D12", "D13"],
-        "i2c_pins": {"sda": "A4", "scl": "A5"},
-        "spi_pins": {"mosi": "D11", "miso": "D12", "sck": "D13", "cs": "D10"},
-        "flash_protocol": "avrdude",
+        "boards": {
+            "nano_classic": {
+                "name": "Arduino Nano Classic",
+                "fqbn": "arduino:avr:nano",
+                "flash_protocol": "avrdude",
+                "onboard": [],
+                "defaults": {},
+                "pins": {
+                    "analog": ["A0", "A1", "A2", "A3", "A4", "A5", "A6", "A7"],
+                    "digital": ["D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10", "D11", "D12", "D13"],
+                    "i2c": {"sda": "A4", "scl": "A5"},
+                },
+            },
+        },
     },
     "esp32": {
-        "name": "ESP32 DevKit",
-        "fqbn": "esp32:esp32:esp32",
-        "mcu": "Xtensa LX6",
+        "name": "ESP32 (Xtensa LX6)",
+        "arch": "xtensa",
         "flash_kb": 4096,
         "ram_kb": 520,
-        "analog_pins": ["GPIO32", "GPIO33", "GPIO34", "GPIO35", "GPIO36", "GPIO39"],
-        "digital_pins": ["GPIO2", "GPIO4", "GPIO5", "GPIO12", "GPIO13", "GPIO14", "GPIO15", "GPIO16", "GPIO17", "GPIO18", "GPIO19", "GPIO21", "GPIO22", "GPIO23", "GPIO25", "GPIO26", "GPIO27"],
-        "i2c_pins": {"sda": "GPIO21", "scl": "GPIO22"},
-        "spi_pins": {"mosi": "GPIO23", "miso": "GPIO19", "sck": "GPIO18", "cs": "GPIO5"},
-        "flash_protocol": "esptool",
+        "boards": {
+            "esp32_devkit": {
+                "name": "ESP32 DevKit V1",
+                "fqbn": "esp32:esp32:esp32",
+                "flash_protocol": "esptool",
+                "onboard": [],
+                "defaults": {},
+                "pins": {
+                    "analog": ["GPIO32", "GPIO33", "GPIO34", "GPIO35", "GPIO36", "GPIO39"],
+                    "digital": ["GPIO2", "GPIO4", "GPIO5", "GPIO12", "GPIO13", "GPIO14", "GPIO15", "GPIO16", "GPIO17", "GPIO18", "GPIO19", "GPIO21", "GPIO22", "GPIO23", "GPIO25", "GPIO26", "GPIO27"],
+                    "i2c": {"sda": "GPIO21", "scl": "GPIO22"},
+                },
+            },
+            "esp32s3_sense": {
+                "name": "XIAO ESP32S3 Sense",
+                "fqbn": "esp32:esp32:XIAO_ESP32S3",
+                "flash_protocol": "esptool",
+                "onboard": ["camera_ov2640", "pdm_mic"],
+                "defaults": {"mic": "onboard_pdm"},
+                "pins": {
+                    "analog": ["A0", "A1", "A2", "A3", "A4", "A5"],
+                    "digital": ["D0", "D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9"],
+                    "i2c": {"sda": "D4", "scl": "D5"},
+                },
+            },
+        },
     },
 }
+
+# Backward compat helper: flat board lookup
+def get_board_info(mcu_key, board_key):
+    mcu = MCUS.get(mcu_key)
+    if not mcu:
+        return None, None
+    board = mcu["boards"].get(board_key)
+    return mcu, board
 
 
 # ============================================================
@@ -288,7 +438,6 @@ async def upload_model(
         "updated": datetime.now().isoformat(),
         "stats": {
             "ram": f"{int(file_size_kb * 0.3)}KB",  # rough estimate
-            "latency": "TBD",
             "flash": f"{int(file_size_kb)}KB",
         },
         "file": str(file_path),
@@ -306,7 +455,29 @@ async def list_datasets():
     return {"datasets": DB["datasets"], "total": len(DB["datasets"])}
 
 
-# --- Boards ---
+# --- MCUs ---
+@app.get("/api/mcus")
+async def list_mcus():
+    return {"mcus": MCUS}
+
+
+# --- Boards (backward compat — flat lookup built from MCUS) ---
+BOARDS = {}
+for mcu_key, mcu in MCUS.items():
+    for board_key, board in mcu["boards"].items():
+        flat_key = f"{mcu_key}__{board_key}"
+        BOARDS[flat_key] = {
+            **board,
+            "mcu_key": mcu_key,
+            "mcu": mcu["name"],
+            "flash_kb": mcu["flash_kb"],
+            "ram_kb": mcu["ram_kb"],
+            "analog_pins": board["pins"].get("analog", []),
+            "digital_pins": board["pins"].get("digital", []),
+            "i2c_pins": board["pins"].get("i2c", {}),
+        }
+
+
 @app.get("/api/boards")
 async def list_boards():
     return {"boards": BOARDS}
@@ -322,6 +493,37 @@ async def get_board(board_key: str):
 # --- Firmware directory (pre-built firmware like keyword_spotting) ---
 FIRMWARE_DIR = BASE_DIR / "firmware"
 FIRMWARE_DIR.mkdir(exist_ok=True)
+
+
+# --- Ports (auto-detect connected devices) ---
+@app.get("/api/ports")
+async def list_ports():
+    """Detect connected boards using arduino-cli."""
+    try:
+        proc = subprocess.run(
+            ["arduino-cli", "board", "list", "--format", "json"],
+            capture_output=True, timeout=10,
+        )
+        if proc.returncode == 0:
+            import json as _json
+            data = _json.loads(proc.stdout.decode(errors="replace"))
+            ports = []
+            for entry in (data if isinstance(data, list) else data.get("detected_ports", [])):
+                port_info = entry.get("port", entry) if isinstance(entry, dict) else {}
+                boards = entry.get("matching_boards", []) if isinstance(entry, dict) else []
+                ports.append({
+                    "address": port_info.get("address", ""),
+                    "protocol": port_info.get("protocol", ""),
+                    "label": port_info.get("label", port_info.get("protocol_label", "")),
+                    "board_name": boards[0].get("name", "Unknown") if boards else "Unknown",
+                    "fqbn": boards[0].get("fqbn", "") if boards else "",
+                })
+            return {"ports": ports}
+        return {"ports": [], "error": proc.stderr.decode(errors="replace")}
+    except FileNotFoundError:
+        return {"ports": [], "error": "arduino-cli not found"}
+    except Exception as e:
+        return {"ports": [], "error": str(e)}
 
 
 def _tflite_to_c_header(tflite_path):
@@ -378,7 +580,7 @@ def _tflite_to_g_model_cpp(tflite_path):
 @app.post("/api/compile")
 async def compile_firmware(
     model_id: str = Form(...),
-    board_key: str = Form("arduino_nano_33_ble"),
+    board_key: str = Form("nrf52840__nano_33_ble"),
     input_source: str = Form("analog"),  # analog, digital, i2c, pdm_microphone, imu
     pin: str = Form("A0"),
     sample_rate_ms: int = Form(100),
@@ -560,7 +762,7 @@ async def compile_firmware(
 @app.post("/api/flash")
 async def flash_firmware(
     build_id: str = Form(...),
-    board_key: str = Form("arduino_nano_33_ble"),
+    board_key: str = Form("nrf52840__nano_33_ble"),
     port: str = Form("COM4"),
 ):
     """Flash compiled firmware to a connected board via arduino-cli upload."""
@@ -610,7 +812,7 @@ async def flash_firmware(
 @app.post("/api/optimize")
 async def optimize_model(
     model_id: str = Form(...),
-    target_board: str = Form("arduino_nano_33_ble"),
+    target_board: str = Form("nrf52840__nano_33_ble"),
     quantize: bool = Form(True),
 ):
     """
