@@ -25,13 +25,19 @@ export const useStore = create((set, get) => ({
 
   deployState: {
     step: 'idle', mcuKey: null, boardKey: null, inputSource: null,
-    pin: 'A0', sampleRateMs: 100, imuFeatures: 3, i2cAddress: '0x68',
+    useDefault: true, sensorProtocol: null,
+    pin: 'A0', sampleRateMs: 100, analogSampleHz: 16000,
+    imuFeatures: 3, i2cAddress: '0x68', i2cSda: '', i2cScl: '', i2cRegister: '0x00',
+    pdmClkPin: '', pdmDataPin: '', spiCsPin: 'D10',
     port: 'COM4', buildId: null, error: null, sketch: null,
   },
   setDeployConfig: (c) => set((s) => ({ deployState: { ...s.deployState, ...c } })),
   resetDeploy: () => set({ deployState: {
     step: 'idle', mcuKey: null, boardKey: null, inputSource: null,
-    pin: 'A0', sampleRateMs: 100, imuFeatures: 3, i2cAddress: '0x68',
+    useDefault: true, sensorProtocol: null,
+    pin: 'A0', sampleRateMs: 100, analogSampleHz: 16000,
+    imuFeatures: 3, i2cAddress: '0x68', i2cSda: '', i2cScl: '', i2cRegister: '0x00',
+    pdmClkPin: '', pdmDataPin: '', spiCsPin: 'D10',
     port: 'COM4', buildId: null, error: null, sketch: null,
   }}),
 
@@ -43,11 +49,20 @@ export const useStore = create((set, get) => ({
       const fd = new FormData();
       fd.append('model_id', selectedModel.id);
       fd.append('board_key', deployState.boardKey || 'nrf52840__nano_33_ble');
-      fd.append('input_source', deployState.inputSource || selectedModel.sensor || 'analog');
+      fd.append('input_source', deployState.inputSource || selectedModel.sensor || 'pdm_microphone');
+      fd.append('use_default', deployState.useDefault !== false ? 'true' : 'false');
+      fd.append('sensor_protocol', deployState.sensorProtocol ?? 0);
       fd.append('pin', deployState.pin || 'A0');
       fd.append('sample_rate_ms', deployState.sampleRateMs || 100);
+      fd.append('analog_sample_hz', deployState.analogSampleHz || 16000);
       fd.append('imu_features', deployState.imuFeatures || 3);
       fd.append('i2c_address', deployState.i2cAddress || '0x68');
+      fd.append('i2c_sda', deployState.i2cSda || '');
+      fd.append('i2c_scl', deployState.i2cScl || '');
+      fd.append('i2c_register', deployState.i2cRegister || '0x00');
+      fd.append('pdm_clk_pin', deployState.pdmClkPin || '');
+      fd.append('pdm_data_pin', deployState.pdmDataPin || '');
+      fd.append('spi_cs_pin', deployState.spiCsPin || 'D10');
       const res = await fetch(`${API_BASE}/compile`, { method: 'POST', body: fd });
       const data = await res.json();
       if (res.ok && data.status === 'compiled') {
@@ -91,22 +106,22 @@ export const useStore = create((set, get) => ({
   },
 
   // Live stats from serial
-  liveStats: { avgLatencyMs: 0, count: 0, lastLabel: null, lastConf: 0 },
+  liveStats: { lastLatencyMs: 0, avgLatencyMs: 0, count: 0, lastLabel: null, lastConf: 0 },
   updateLiveStats: (entry) => {
     if (!entry.parsed) return;
     set((s) => {
       const p = entry.parsed;
-      const lat = p.infer_us ? p.infer_us / 1000 : (p.t ? 0 : s.liveStats.avgLatencyMs);
+      const lat = p.infer_us ? p.infer_us / 1000 : s.liveStats.lastLatencyMs;
       const c = s.liveStats.count + 1;
       const avg = c === 1 ? lat : s.liveStats.avgLatencyMs * 0.85 + lat * 0.15;
       return { liveStats: {
-        avgLatencyMs: avg, count: c,
+        lastLatencyMs: lat, avgLatencyMs: avg, count: c,
         lastLabel: p.label || s.liveStats.lastLabel,
         lastConf: p.confidence || p.raw_score ? (p.confidence || p.raw_score / 255) : s.liveStats.lastConf,
       }};
     });
   },
-  resetLiveStats: () => set({ liveStats: { avgLatencyMs: 0, count: 0, lastLabel: null, lastConf: 0 } }),
+  resetLiveStats: () => set({ liveStats: { lastLatencyMs: 0, avgLatencyMs: 0, count: 0, lastLabel: null, lastConf: 0 } }),
 }));
 
 export default useStore;

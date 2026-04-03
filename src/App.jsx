@@ -252,8 +252,9 @@ const ModelDetailsPanel = ({ model, liveStats, serial }) => {
           </h2>
           <div className="grid grid-cols-3 gap-3 mb-4">
             <div className="text-center">
-              <div className="text-2xl font-bold text-yellow-400">{liveStats.avgLatencyMs.toFixed(1)}</div>
+              <div className="text-2xl font-bold text-yellow-400">{liveStats.lastLatencyMs.toFixed(1)}</div>
               <div className="text-xs text-gray-400">ms latency</div>
+              <div className="text-[10px] text-gray-500">avg: {liveStats.avgLatencyMs.toFixed(1)}ms</div>
             </div>
             <div className="text-center">
               <div className="text-2xl font-bold text-green-400">{liveStats.count}</div>
@@ -297,17 +298,9 @@ const DeployPanel = ({ model, deployState, mcus, boards, serial }) => {
       </div>
 
       <div className="p-4 space-y-4">
-        {/* Steps 1-3: MCU → Board → Input (PinConfigurator) */}
+        {/* Steps 1-4: MCU → Board → Sensor Config (PinConfigurator) */}
         <PinConfigurator
-          config={{
-            mcuKey: deployState.mcuKey,
-            boardKey: deployState.boardKey,
-            inputSource: deployState.inputSource || model.sensor,
-            pin: deployState.pin,
-            sampleRateMs: deployState.sampleRateMs,
-            imuFeatures: deployState.imuFeatures,
-            i2cAddress: deployState.i2cAddress,
-          }}
+          config={deployState}
           onChange={(cfg) => setDeployConfig(cfg)}
           mcus={mcus}
           boards={boards}

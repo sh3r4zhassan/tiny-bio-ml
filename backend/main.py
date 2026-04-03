@@ -43,9 +43,9 @@ for d in [MODELS_DIR, DATASETS_DIR, BUILDS_DIR]:
 DB = {
     "models": [
         {
-            "id": "tbio-kws-yes-no",
-            "slug": "tbio/kws-yes-no",
-            "title": "Keyword Spotting",
+            "id": "tbio-kws-yes-no-v1",
+            "slug": "tbio/kws-yes-no-v1",
+            "title": "Keyword Spotting (Yes/No)",
             "author": "TinyBioML",
             "task": "Audio Classification",
             "description": "Real-time keyword detection from microphone audio. Detects 'yes' and 'no' commands using a DS-CNN on 40-bin log-mel filterbank features. Designed for always-on voice interfaces on battery-powered biomedical wearables.",
@@ -581,11 +581,20 @@ def _tflite_to_g_model_cpp(tflite_path):
 async def compile_firmware(
     model_id: str = Form(...),
     board_key: str = Form("nrf52840__nano_33_ble"),
-    input_source: str = Form("analog"),  # analog, digital, i2c, pdm_microphone, imu
+    input_source: str = Form("pdm_microphone"),
+    use_default: bool = Form(True),
+    sensor_protocol: int = Form(0),  # 0=PDM, 1=analog, 2=I2C, 3=SPI
     pin: str = Form("A0"),
     sample_rate_ms: int = Form(100),
-    imu_features: int = Form(3),  # 3=accel, 6=accel+gyro
+    analog_sample_hz: int = Form(16000),
+    imu_features: int = Form(3),
     i2c_address: str = Form("0x68"),
+    i2c_sda: str = Form("A4"),
+    i2c_scl: str = Form("A5"),
+    i2c_register: str = Form("0x00"),
+    pdm_clk_pin: str = Form(""),
+    pdm_data_pin: str = Form(""),
+    spi_cs_pin: str = Form("D10"),
 ):
     """
     Generates firmware from template, compiles with arduino-cli,
@@ -654,25 +663,31 @@ async def compile_firmware(
         model_name=model["title"],
         timestamp=datetime.now().isoformat(),
         serial_baud=115200,
-        json_output=True,
-        # Input source
-        input_source=source_map.get(input_source, input_source),
-        # Mic
-        mic_use_default=True,
+        # Sensor config
+        sensor_protocol=sensor_protocol,
+        use_default=use_default,
+        # PDM
         mic_gain=20,
+        pdm_clk_pin=pdm_clk_pin if pdm_clk_pin else "26",
+        pdm_data_pin=pdm_data_pin if pdm_data_pin else "25",
         # Analog
         analog_pin=pin,
-        sample_rate_ms=sample_rate_ms,
-        analog_max=4095 if "esp32" in board_key else 1023,
-        # IMU
-        imu_use_default=True,
-        imu_axes=imu_features,
+        analog_sample_hz=analog_sample_hz,
+        analog_resolution=4095 if "esp32" in board_key else 1023,
         # I2C
         i2c_address=i2c_address,
-        i2c_sda=board.get("i2c_pins", {}).get("sda", "A4"),
-        i2c_scl=board.get("i2c_pins", {}).get("scl", "A5"),
-        # LEDs (defaults for Nano 33 BLE)
-        output_pins=[],
+        i2c_sda=i2c_sda or board.get("i2c_pins", {}).get("sda", "A4"),
+        i2c_scl=i2c_scl or board.get("i2c_pins", {}).get("scl", "A5"),
+        i2c_register=i2c_register,
+        i2c_read_bytes=2,
+        # SPI
+        spi_cs_pin=spi_cs_pin,
+        # LEDs — use board defaults if available
+        **({
+            "led_class_0": board.get("defaults", {}).get("led_class_0"),
+            "led_class_1": board.get("defaults", {}).get("led_class_1"),
+            "led_class_2": board.get("defaults", {}).get("led_class_2"),
+        } if board.get("defaults", {}).get("led_class_0") else {}),
     )
     with open(sketch_dir / "pin_config.h", "w") as fw:
         fw.write(pin_config)
