@@ -29,6 +29,7 @@ export const useStore = create((set, get) => ({
     pin: 'A0', sampleRateMs: 100, analogSampleHz: 16000,
     imuFeatures: 3, i2cAddress: '0x68', i2cSda: '', i2cScl: '', i2cRegister: '0x00',
     pdmClkPin: '', pdmDataPin: '', spiCsPin: 'D10',
+    customModelId: null,
     port: 'COM4', buildId: null, error: null, sketch: null,
   },
   setDeployConfig: (c) => set((s) => ({ deployState: { ...s.deployState, ...c } })),
@@ -38,6 +39,7 @@ export const useStore = create((set, get) => ({
     pin: 'A0', sampleRateMs: 100, analogSampleHz: 16000,
     imuFeatures: 3, i2cAddress: '0x68', i2cSda: '', i2cScl: '', i2cRegister: '0x00',
     pdmClkPin: '', pdmDataPin: '', spiCsPin: 'D10',
+    customModelId: null,
     port: 'COM4', buildId: null, error: null, sketch: null,
   }}),
 
@@ -49,6 +51,7 @@ export const useStore = create((set, get) => ({
       const fd = new FormData();
       fd.append('model_id', selectedModel.id);
       fd.append('board_key', deployState.boardKey || 'nrf52840__nano_33_ble');
+      fd.append('custom_model_id', deployState.customModelId || '');
       fd.append('input_source', deployState.inputSource || selectedModel.sensor || 'pdm_microphone');
       fd.append('use_default', deployState.useDefault !== false ? 'true' : 'false');
       fd.append('sensor_protocol', deployState.sensorProtocol ?? 0);

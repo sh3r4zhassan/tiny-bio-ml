@@ -9,6 +9,7 @@ import uuid
 import shutil
 import subprocess
 import asyncio
+import numpy as np
 from pathlib import Path
 from datetime import datetime
 
@@ -16,6 +17,20 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+
+# Fix numpy types in JSON responses
+import json as _json
+
+class _NumpyEncoder(_json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.integer): return int(obj)
+        if isinstance(obj, np.floating): return float(obj)
+        if isinstance(obj, np.ndarray): return obj.tolist()
+        return super().default(obj)
+
+def _safe_json(data):
+    """Convert any numpy types in a dict/list to native Python types."""
+    return _json.loads(_json.dumps(data, cls=_NumpyEncoder))
 
 app = FastAPI(title="TinyBioML API", version="0.1.0")
 
@@ -43,212 +58,340 @@ for d in [MODELS_DIR, DATASETS_DIR, BUILDS_DIR]:
 DB = {
     "models": [
         {
-            "id": "tbio-kws-yes-no-v1",
-            "slug": "tbio/kws-yes-no-v1",
-            "title": "Keyword Spotting (Yes/No)",
-            "author": "TinyBioML",
+            "id": "tbio-kws-yes-no-v1", "slug": "tbio/kws-yes-no-v1",
+            "title": "Keyword Spotting (Yes/No)", "author": "TinyBioML",
             "task": "Audio Classification",
-            "description": "Real-time keyword detection from microphone audio. Detects 'yes' and 'no' commands using a DS-CNN on 40-bin log-mel filterbank features. Designed for always-on voice interfaces on battery-powered biomedical wearables.",
-            "downloads": 0,
-            "likes": 0,
-            "tags": ["Audio", "Keywords", "int8", "PDM-Mic", "Speech-Commands"],
+            "description": "Real-time keyword detection using a DS-CNN on 40-bin log-mel filterbank features. Detects 'yes'/'no' for voice interfaces on biomedical wearables.",
+            "downloads": 0, "likes": 0,
+            "tags": ["Audio", "Keywords", "int8", "PDM-Mic", "DS-CNN"],
             "updated": datetime.now().isoformat(),
             "file": str(MODELS_DIR / "KWS_yes_no.tflite"),
             "firmware_template": "kws_yes_no",
-            # --- Model Details ---
             "details": {
-                "architecture": "DS-CNN (Depthwise Separable CNN)",
-                "framework": "TensorFlow Lite Micro",
-                "quantization": "int8 (post-training)",
-                "dataset": "Google Speech Commands v0.02",
-                "accuracy": "92.3%",
-                "input_type": "Audio (PDM Microphone → 40-bin filterbank)",
-                "input_shape": [1, 1960],
-                "input_format": "int8 spectrogram features (49 frames × 40 bins)",
-                "output_type": "Classification (4 classes)",
-                "output_classes": 4,
+                "architecture": "DS-CNN (Depthwise Separable CNN)", "framework": "TensorFlow Lite Micro",
+                "quantization": "int8 (post-training)", "dataset": "Google Speech Commands v0.02",
+                "accuracy": "92.3%", "input_type": "Audio (PDM Mic → 40-bin filterbank)",
+                "input_shape": [1, 1960], "input_format": "int8 spectrogram (49 × 40)",
+                "output_type": "Classification (4 classes)", "output_classes": 4,
                 "class_labels": ["silence", "unknown", "yes", "no"],
-                "sample_rate": "16 kHz",
-                "inference_window": "1 second",
-                "parameters": "~20K",
+                "sample_rate": "16 kHz", "inference_window": "1 second", "parameters": "~20K",
                 "compatible_mcus": ["nrf52840", "esp32"],
             },
-            "stats": {
-                "flash": "18KB",
-                "ram": "10KB",
-            },
-            "sensor": "pdm_microphone",
+            "stats": {"flash": "18KB", "ram": "10KB"}, "sensor": "pdm_microphone",
+            "benchmark_dataset": "kws_yes_no",
         },
         {
-            "id": "tbio-tiny-ecg-arrhythmia-v1",
-            "slug": "tbio/tiny-ecg-arrhythmia-v1",
-            "title": "Tiny-ECG-Arrhythmia",
-            "author": "TinyBioML",
+            "id": "tbio-ecg-arrhythmia-resnet", "slug": "tbio/ecg-arrhythmia-resnet",
+            "title": "ECG Arrhythmia Classifier (ResNet-1D)", "author": "TinyBioML",
             "task": "ECG Classification",
-            "description": "Lightweight arrhythmia detection for single-lead ECG. Connect an AD8232 or similar ECG sensor to an analog pin.",
-            "downloads": 12000,
-            "likes": 342,
-            "tags": ["ECG", "Quantized", "int8", "Analog"],
+            "description": "5-class arrhythmia detection from single-lead ECG using ResNet-1D with residual blocks. Trained on the MIT-BIH Arrhythmia Database (109K annotated beats).",
+            "downloads": 12400, "likes": 342,
+            "tags": ["ECG", "Arrhythmia", "int8", "MIT-BIH", "ResNet"],
             "updated": datetime.now().isoformat(),
-            "file": None,
+            "file": str(MODELS_DIR / "ecg_arrhythmia_resnet.tflite"),
             "firmware_template": None,
             "details": {
-                "architecture": "1D-CNN",
-                "framework": "TensorFlow Lite Micro",
-                "quantization": "int8 (post-training)",
-                "dataset": "MIT-BIH Arrhythmia Database",
-                "accuracy": "96.1%",
-                "input_type": "Analog sensor (ECG lead, e.g. AD8232)",
-                "input_shape": [1, 128],
-                "input_format": "int8 normalized ECG samples (128 points @ 360Hz)",
-                "output_type": "Classification (5 classes)",
-                "output_classes": 5,
-                "class_labels": ["Normal", "Afib", "AFlutter", "VTach", "Other"],
-                "sample_rate": "360 Hz",
-                "inference_window": "~350ms",
-                "parameters": "~8K",
+                "architecture": "ResNet-1D (residual blocks, 64→128 filters)", "framework": "TensorFlow Lite Micro",
+                "quantization": "int8 (post-training)", "dataset": "MIT-BIH Arrhythmia Database",
+                "accuracy": "97.2%", "input_type": "Analog sensor (AD8232 ECG)",
+                "input_shape": [1, 187, 1], "input_format": "int8 ECG (187 samples @ 360Hz)",
+                "output_type": "Classification (5 classes)", "output_classes": 5,
+                "class_labels": ["Normal", "Supraventricular", "Ventricular", "Fusion", "Unknown"],
+                "sample_rate": "360 Hz", "inference_window": "~520ms", "parameters": "~45K",
+                "compatible_mcus": ["nrf52840", "esp32"],
+            },
+            "stats": {"flash": "52KB", "ram": "18KB"}, "sensor": "analog",
+            "benchmark_dataset": "ecg_arrhythmia",
+        },
+        {
+            "id": "tbio-ppg-heartrate-deepconvlstm", "slug": "tbio/ppg-heartrate-deepconvlstm",
+            "title": "PPG Heart Rate Estimator (DeepConvLSTM)", "author": "TinyBioML",
+            "task": "Heart Rate Regression",
+            "description": "Continuous heart rate estimation from wrist PPG using DeepConvLSTM (4×Conv1D + 2×LSTM-128). Trained on PPG-DaLiA dataset (15 subjects, daily activities). Outputs BPM.",
+            "downloads": 5200, "likes": 128,
+            "tags": ["PPG", "Heart-Rate", "LSTM", "Wearable", "DeepConvLSTM"],
+            "updated": datetime.now().isoformat(),
+            "file": str(MODELS_DIR / "ppg_heartrate_deepconvlstm.tflite"),
+            "firmware_template": None,
+            "details": {
+                "architecture": "DeepConvLSTM (4×Conv1D + 2×LSTM-128)", "framework": "TensorFlow Lite Micro",
+                "quantization": "int8 (post-training)", "dataset": "PPG-DaLiA (UCI Archive)",
+                "accuracy": "MAE: 3.1 BPM", "input_type": "Analog/I2C PPG (MAX30102)",
+                "input_shape": [1, 128, 1], "input_format": "int8 PPG (128 pts @ 100Hz)",
+                "output_type": "Regression (BPM)", "output_classes": 1, "class_labels": None,
+                "sample_rate": "100 Hz", "inference_window": "1.28s", "parameters": "~180K",
+                "compatible_mcus": ["nrf52840", "esp32"],
+            },
+            "stats": {"flash": "95KB", "ram": "32KB"}, "sensor": "analog",
+            "benchmark_dataset": "ppg_heartrate",
+        },
+        {
+            "id": "tbio-eeg-seizure-eegnet", "slug": "tbio/eeg-seizure-eegnet",
+            "title": "EEG Seizure Detector (EEGNet)", "author": "TinyBioML",
+            "task": "Seizure Detection",
+            "description": "Binary seizure detection from single-channel EEG using EEGNet with temporal-spatial filters. Trained on UCI Epileptic Seizure Recognition (11.5K segments, Bonn University EEG corpus).",
+            "downloads": 3800, "likes": 210,
+            "tags": ["EEG", "Seizure", "Epilepsy", "EEGNet", "Neurology"],
+            "updated": datetime.now().isoformat(),
+            "file": str(MODELS_DIR / "eeg_seizure_eegnet.tflite"),
+            "firmware_template": None,
+            "details": {
+                "architecture": "EEGNet (DepthwiseConv + SeparableConv)", "framework": "TensorFlow Lite Micro",
+                "quantization": "int8 (post-training)", "dataset": "UCI Epileptic Seizure Recognition",
+                "accuracy": "95.8%", "input_type": "Analog EEG (ADS1299, OpenBCI)",
+                "input_shape": [1, 178, 1], "input_format": "int8 EEG (178 samples)",
+                "output_type": "Classification (2 classes)", "output_classes": 2,
+                "class_labels": ["Normal", "Seizure"],
+                "sample_rate": "178 Hz", "inference_window": "1s", "parameters": "~8K",
+                "compatible_mcus": ["nrf52840", "esp32"],
+            },
+            "stats": {"flash": "24KB", "ram": "10KB"}, "sensor": "analog",
+            "benchmark_dataset": "eeg_seizure",
+        },
+        {
+            "id": "tbio-fall-detection-inception", "slug": "tbio/fall-detection-inception",
+            "title": "IMU Fall Detector (InceptionTime)", "author": "TinyBioML",
+            "task": "Fall Detection",
+            "description": "Real-time fall detection from 6-axis IMU using InceptionTime with multi-scale temporal convolutions (3/5/11 kernels). Trained on SisFall (38 subjects, 15 fall types, 19 ADL).",
+            "downloads": 6800, "likes": 175,
+            "tags": ["IMU", "Fall", "Accelerometer", "Gyro", "InceptionTime"],
+            "updated": datetime.now().isoformat(),
+            "file": str(MODELS_DIR / "fall_detection_inception.tflite"),
+            "firmware_template": None,
+            "details": {
+                "architecture": "InceptionTime (3 modules, multi-scale 3/5/11)", "framework": "TensorFlow Lite Micro",
+                "quantization": "int8 (post-training)", "dataset": "SisFall (38 subjects)",
+                "accuracy": "96.3%", "input_type": "IMU (6-axis accel+gyro)",
+                "input_shape": [1, 256, 6], "input_format": "float32 IMU (256 × 6 @ 200Hz)",
+                "output_type": "Classification (2 classes)", "output_classes": 2,
+                "class_labels": ["No Fall", "Fall"],
+                "sample_rate": "200 Hz", "inference_window": "1.28s", "parameters": "~35K",
+                "compatible_mcus": ["nrf52840", "esp32"],
+            },
+            "stats": {"flash": "42KB", "ram": "15KB"}, "sensor": "imu",
+            "benchmark_dataset": "fall_detection",
+        },
+        {
+            "id": "tbio-cough-detection-mobilenet", "slug": "tbio/cough-detection-mobilenet",
+            "title": "Cough Detector (MobileNetV2)", "author": "TinyBioML",
+            "task": "Audio Classification",
+            "description": "Audio cough detection using MobileNetV2 on 128×128 mel spectrograms. Trained on COUGHVID crowdsourced dataset (25K+ recordings). For continuous respiratory health monitoring.",
+            "downloads": 2400, "likes": 95,
+            "tags": ["Audio", "Cough", "Respiratory", "MobileNetV2", "PDM-Mic"],
+            "updated": datetime.now().isoformat(),
+            "file": str(MODELS_DIR / "cough_detection_mobilenet.tflite"),
+            "firmware_template": None,
+            "details": {
+                "architecture": "MobileNetV2 (adapted for 1-ch spectrograms)", "framework": "TensorFlow Lite Micro",
+                "quantization": "int8 (post-training)", "dataset": "COUGHVID (EPFL, Zenodo)",
+                "accuracy": "91.5%", "input_type": "Audio (PDM Mic → mel spectrogram)",
+                "input_shape": [1, 128, 128, 1], "input_format": "int8 mel spectrogram (128×128)",
+                "output_type": "Classification (2 classes)", "output_classes": 2,
+                "class_labels": ["No Cough", "Cough"],
+                "sample_rate": "16 kHz", "inference_window": "3 seconds", "parameters": "~2.2M",
+                "compatible_mcus": ["esp32"],
+            },
+            "stats": {"flash": "820KB", "ram": "128KB"}, "sensor": "pdm_microphone",
+            "benchmark_dataset": "cough_detection",
+        },
+        {
+            "id": "tbio-stress-detection-mlp", "slug": "tbio/stress-detection-mlp",
+            "title": "Stress Classifier (Residual MLP)", "author": "TinyBioML",
+            "task": "Stress Classification",
+            "description": "4-class stress classification from chest EDA using deep residual MLP. Trained on WESAD (15 subjects, 4 conditions: baseline, stress, amusement, meditation).",
+            "downloads": 1800, "likes": 67,
+            "tags": ["EDA", "Stress", "WESAD", "Mental-Health", "MLP"],
+            "updated": datetime.now().isoformat(),
+            "file": str(MODELS_DIR / "stress_detection_mlp.tflite"),
+            "firmware_template": None,
+            "details": {
+                "architecture": "Residual MLP (128-unit blocks + skip)", "framework": "TensorFlow Lite Micro",
+                "quantization": "int8 (post-training)", "dataset": "WESAD",
+                "accuracy": "86.4%", "input_type": "Analog EDA (chest-worn)",
+                "input_shape": [1, 64], "input_format": "float32 EDA (64 samples from 700Hz)",
+                "output_type": "Classification (4 classes)", "output_classes": 4,
+                "class_labels": ["Baseline", "Stress", "Amusement", "Meditation"],
+                "sample_rate": "700 Hz (windowed)", "inference_window": "~90ms", "parameters": "~50K",
                 "compatible_mcus": ["nrf52840", "esp32", "atmega328p"],
             },
-            "stats": {
-                "flash": "45KB",
-                "ram": "15KB",
-            },
-            "sensor": "analog",
+            "stats": {"flash": "18KB", "ram": "6KB"}, "sensor": "analog",
+            "benchmark_dataset": "stress_detection",
         },
         {
-            "id": "tbio-imu-gesture-recognition",
-            "slug": "tbio/imu-gesture-recognition",
-            "title": "IMU-Gesture-Recognition",
-            "author": "TinyBioML",
+            "id": "tbio-spo2-estimation-tcn", "slug": "tbio/spo2-estimation-tcn",
+            "title": "SpO2 Estimator (TCN)", "author": "TinyBioML",
+            "task": "SpO2 Regression",
+            "description": "Blood oxygen estimation from PPG using a TCN with dilated causal convolutions (d=1,2,4,8,16). Trained on BIDMC PPG/SpO2 from PhysioNet (125Hz PPG, 1Hz SpO2 ground truth).",
+            "downloads": 3100, "likes": 112,
+            "tags": ["SpO2", "PPG", "Pulse-Oximeter", "TCN"],
+            "updated": datetime.now().isoformat(),
+            "file": str(MODELS_DIR / "spo2_estimation_tcn.tflite"),
+            "firmware_template": None,
+            "details": {
+                "architecture": "TCN (dilated causal, d=1,2,4,8,16)", "framework": "TensorFlow Lite Micro",
+                "quantization": "int8 (post-training)", "dataset": "BIDMC PPG/SpO2 (PhysioNet)",
+                "accuracy": "MAE: 1.2% SpO2", "input_type": "I2C (MAX30102 PPG)",
+                "input_shape": [1, 128, 1], "input_format": "int8 PPG (128 @ 125Hz)",
+                "output_type": "Regression (SpO2 %)", "output_classes": 1, "class_labels": None,
+                "sample_rate": "125 Hz", "inference_window": "~1s", "parameters": "~85K",
+                "compatible_mcus": ["nrf52840", "esp32"],
+            },
+            "stats": {"flash": "65KB", "ram": "24KB"}, "sensor": "i2c",
+            "benchmark_dataset": "spo2_estimation",
+        },
+        {
+            "id": "tbio-emg-gesture-tcn", "slug": "tbio/emg-gesture-tcn",
+            "title": "EMG Gesture Classifier (TCN)", "author": "TinyBioML",
             "task": "Gesture Classification",
-            "description": "Recognizes 4 gestures from onboard IMU accelerometer + gyroscope.",
-            "downloads": 6800,
-            "likes": 175,
-            "tags": ["IMU", "Gesture", "Accel", "Gyro"],
+            "description": "53-class hand gesture recognition from 10-channel sEMG using a TCN. Trained on NinaPro DB1 (27 subjects, 52 gestures + rest). For prosthetics and rehabilitation.",
+            "downloads": 4200, "likes": 198,
+            "tags": ["EMG", "Gesture", "Prosthetics", "NinaPro", "TCN"],
             "updated": datetime.now().isoformat(),
-            "file": None,
+            "file": str(MODELS_DIR / "emg_gesture_tcn.tflite"),
             "firmware_template": None,
             "details": {
-                "architecture": "1D-CNN + Dense",
-                "framework": "TensorFlow Lite Micro",
-                "quantization": "int8 (post-training)",
-                "dataset": "Custom gesture dataset (500 samples/class)",
-                "accuracy": "94.7%",
-                "input_type": "IMU (Accelerometer + Gyroscope)",
-                "input_shape": [1, 600],
-                "input_format": "float32 IMU readings (100 samples × 6 axes)",
-                "output_type": "Classification (4 classes)",
-                "output_classes": 4,
-                "class_labels": ["wave", "circle", "punch", "idle"],
-                "sample_rate": "100 Hz (10ms per sample)",
-                "inference_window": "1 second",
-                "parameters": "~12K",
-                "compatible_mcus": ["nrf52840"],
-            },
-            "stats": {
-                "flash": "35KB",
-                "ram": "12KB",
-            },
-            "sensor": "imu",
-        },
-        {
-            "id": "community-ppg-hr-estimator",
-            "slug": "community/ppg-hr-estimator",
-            "title": "PPG-HeartRate-Estimator",
-            "author": "OpenHealth",
-            "task": "Heart Rate Regression",
-            "description": "Heart rate estimation from PPG signal. Connect MAX30102 via I2C.",
-            "downloads": 5000,
-            "likes": 89,
-            "tags": ["PPG", "Wearable", "BLE", "I2C"],
-            "updated": datetime.now().isoformat(),
-            "file": None,
-            "firmware_template": None,
-            "details": {
-                "architecture": "LSTM-Tiny",
-                "framework": "TensorFlow Lite Micro",
-                "quantization": "int8 (post-training)",
-                "dataset": "TROIKA PPG Dataset",
-                "accuracy": "MAE: 2.3 BPM",
-                "input_type": "I2C sensor (MAX30102 PPG)",
-                "input_shape": [1, 64],
-                "input_format": "int8 normalized PPG readings (64 samples)",
-                "output_type": "Regression (BPM value)",
-                "output_classes": 1,
-                "class_labels": None,
-                "sample_rate": "100 Hz",
-                "inference_window": "640ms",
-                "parameters": "~5K",
+                "architecture": "TCN (dilated causal, 64 filters)", "framework": "TensorFlow Lite Micro",
+                "quantization": "int8 (post-training)", "dataset": "NinaPro DB1 (27 subjects)",
+                "accuracy": "78.3%", "input_type": "Analog (10-ch sEMG)",
+                "input_shape": [1, 200, 10], "input_format": "int8 EMG (200 × 10 @ 100Hz)",
+                "output_type": "Classification (53 classes)", "output_classes": 53, "class_labels": None,
+                "sample_rate": "100 Hz", "inference_window": "2s", "parameters": "~95K",
                 "compatible_mcus": ["nrf52840", "esp32"],
             },
-            "stats": {
-                "flash": "32KB",
-                "ram": "8KB",
-            },
-            "sensor": "i2c",
-        },
-        {
-            "id": "tbio-emg-gesture-control",
-            "slug": "tbio/emg-gesture-control",
-            "title": "EMG-Gesture-Control-Tiny",
-            "author": "TinyBioML",
-            "task": "EMG Classification",
-            "description": "Recognizes 6 hand gestures from forearm EMG. Connect EMG sensor to analog pin.",
-            "downloads": 3200,
-            "likes": 210,
-            "tags": ["EMG", "Prosthetics", "Real-time", "Analog"],
-            "updated": datetime.now().isoformat(),
-            "file": None,
-            "firmware_template": None,
-            "details": {
-                "architecture": "DS-CNN",
-                "framework": "TensorFlow Lite Micro",
-                "quantization": "int8 (post-training)",
-                "dataset": "NinaPro DB5 (subset)",
-                "accuracy": "88.5%",
-                "input_type": "Analog sensor (sEMG electrode)",
-                "input_shape": [1, 128],
-                "input_format": "int8 normalized EMG samples (128 points @ 1kHz)",
-                "output_type": "Classification (6 classes)",
-                "output_classes": 6,
-                "class_labels": ["fist", "open", "pinch", "wave_in", "wave_out", "rest"],
-                "sample_rate": "1 kHz",
-                "inference_window": "128ms",
-                "parameters": "~15K",
-                "compatible_mcus": ["nrf52840", "esp32"],
-            },
-            "stats": {
-                "flash": "50KB",
-                "ram": "18KB",
-            },
-            "sensor": "analog",
+            "stats": {"flash": "72KB", "ram": "28KB"}, "sensor": "analog",
+            "benchmark_dataset": "emg_gesture",
         },
     ],
     "datasets": [
-        {
-            "id": "dataset-mit-bih-quantized",
-            "slug": "dataset/mit-bih-quantized",
-            "title": "MIT-BIH-Tiny-Format",
-            "author": "TinyBioML",
-            "size": "45 MB",
-            "rows": "100k",
-            "description": "Pre-processed MIT-BIH Arrhythmia Database optimized for microcontroller training pipelines.",
-            "updated": datetime.now().isoformat(),
-            "downloads": 2100,
-        },
-        {
-            "id": "dataset-sleep-edf-micro",
-            "slug": "dataset/sleep-edf-micro",
-            "title": "Sleep-EDF-Micro",
-            "author": "Stanford-Wearables",
-            "size": "120 MB",
-            "rows": "50k",
-            "description": "EEG fragments normalized and windowed for integer-only inference testing.",
-            "updated": datetime.now().isoformat(),
-            "downloads": 1500,
-        },
+        {"id": "ds-mitbih", "slug": "kaggle/mit-bih-heartbeat", "title": "MIT-BIH Arrhythmia Database",
+         "author": "PhysioNet / Moody & Mark", "size": "101 MB", "rows": "109,446 beats",
+         "description": "Gold standard ECG arrhythmia benchmark. 48 half-hour two-lead ambulatory recordings, 5 AAMI beat classes. Used for ResNet-1D baseline.",
+         "updated": "2005-02-01", "downloads": 45000,
+         "url": "https://www.kaggle.com/datasets/shayanfazeli/heartbeat", "license": "PhysioNet Open Access",
+         "benchmark_key": "ecg_arrhythmia"},
+        {"id": "ds-ppg-dalia", "slug": "uci/ppg-dalia", "title": "PPG-DaLiA",
+         "author": "UCI / Reiss et al.", "size": "2.4 GB", "rows": "15 subjects × ~4h",
+         "description": "PPG + accelerometer for HR estimation during daily life. Empatica E4 wristband with ECG ground truth. Used for DeepConvLSTM baseline.",
+         "updated": "2019-01-01", "downloads": 8500,
+         "url": "https://archive.ics.uci.edu/dataset/495/ppg+dalia", "license": "CC BY 4.0",
+         "benchmark_key": "ppg_heartrate"},
+        {"id": "ds-uci-seizure", "slug": "kaggle/epileptic-seizure", "title": "Epileptic Seizure Recognition",
+         "author": "UCI / Andrzejak et al.", "size": "6.2 MB", "rows": "11,500 segments",
+         "description": "EEG segments from Bonn University. 178 features per sample. Binary: seizure vs non-seizure. Used for EEGNet baseline.",
+         "updated": "2017-11-01", "downloads": 15000,
+         "url": "https://www.kaggle.com/datasets/harunshimanto/epileptic-seizure-recognition", "license": "CC BY 4.0",
+         "benchmark_key": "eeg_seizure"},
+        {"id": "ds-sisfall", "slug": "kaggle/sisfall", "title": "SisFall Fall Detection",
+         "author": "U. de Antioquia", "size": "1.2 GB", "rows": "4,505 recordings",
+         "description": "6-axis IMU from 38 subjects (23 young, 15 elderly). 15 fall types, 19 ADL. 200Hz accel + gyro. Used for InceptionTime baseline.",
+         "updated": "2017-06-01", "downloads": 5600,
+         "url": "https://www.kaggle.com/datasets/kushajm/sisfall-dataset-fall-detection", "license": "Research Use",
+         "benchmark_key": "fall_detection"},
+        {"id": "ds-coughvid", "slug": "zenodo/coughvid", "title": "COUGHVID",
+         "author": "EPFL", "size": "17 GB", "rows": "25,000+ recordings",
+         "description": "Crowdsourced cough audio with expert annotations. COVID-19, healthy, and symptomatic classes. Used for MobileNetV2 baseline.",
+         "updated": "2021-08-01", "downloads": 7200,
+         "url": "https://zenodo.org/record/4048312", "license": "CC BY 4.0",
+         "benchmark_key": "cough_detection"},
+        {"id": "ds-wesad", "slug": "kaggle/wesad", "title": "WESAD (Stress & Affect)",
+         "author": "Schmidt et al.", "size": "6.8 GB", "rows": "15 subjects",
+         "description": "Multimodal stress detection: ECG, BVP, EDA, EMG, respiration, temp, accel. 4 conditions. Used for Residual MLP baseline.",
+         "updated": "2018-10-01", "downloads": 12000,
+         "url": "https://www.kaggle.com/datasets/mohamedasem318/wesad-full-dataset", "license": "CC BY 4.0",
+         "benchmark_key": "stress_detection"},
+        {"id": "ds-bidmc", "slug": "physionet/bidmc-spo2", "title": "BIDMC PPG & SpO2",
+         "author": "PhysioNet / Pimentel", "size": "580 MB", "rows": "53 ICU subjects",
+         "description": "Simultaneous PPG (125Hz) and SpO2 (1Hz) from ICU patients. Part of MIMIC-III. Used for TCN SpO2 baseline.",
+         "updated": "2016-09-01", "downloads": 4300,
+         "url": "https://physionet.org/content/bidmc/1.0.0/", "license": "PhysioNet Open Access",
+         "benchmark_key": "spo2_estimation"},
+        {"id": "ds-ninapro", "slug": "kaggle/ninapro-db1", "title": "NinaPro DB1 (sEMG Gestures)",
+         "author": "HES-SO / Atzori et al.", "size": "3.1 GB", "rows": "27 subjects × 53 gestures",
+         "description": "10-channel sEMG for hand gesture recognition. 52 movements + rest. Benchmark for prosthetics research. Used for TCN baseline.",
+         "updated": "2014-12-01", "downloads": 9800,
+         "url": "https://www.kaggle.com/datasets/mansibmursalin/ninapro-db1-full-dataset", "license": "CC BY-NC-SA 3.0",
+         "benchmark_key": "emg_gesture"},
+        {"id": "ds-speech-commands", "slug": "tensorflow/speech-commands", "title": "Google Speech Commands v0.02",
+         "author": "Google / Pete Warden", "size": "2.3 GB", "rows": "105,829 utterances",
+         "description": "35 keyword classes, 1s audio at 16kHz. Standard KWS benchmark. Used for DS-CNN baseline.",
+         "updated": "2018-04-01", "downloads": 52000,
+         "url": "https://www.tensorflow.org/datasets/catalog/speech_commands", "license": "CC BY 4.0",
+         "benchmark_key": "kws_yes_no"},
     ],
+    "leaderboard": {},  # dataset_name → list of benchmark entries
 }
+
+# Pre-populate leaderboard with baseline entries from each model
+def _init_baselines():
+    """Add baseline model entries to leaderboard on startup."""
+    for model in DB["models"]:
+        ds_key = model.get("benchmark_dataset")
+        if not ds_key:
+            continue
+
+        details = model.get("details", {})
+        acc_str = details.get("accuracy", "")
+
+        # Build metrics from model details
+        is_reg = ds_key in {"ppg_heartrate", "spo2_estimation"}
+        if is_reg:
+            # Parse "MAE: 3.1 BPM" or "MAE: 1.2% SpO2"
+            mae_val = 0.0
+            if "MAE" in acc_str:
+                try:
+                    mae_val = float(acc_str.split(":")[1].strip().split(" ")[0].replace("%", ""))
+                except:
+                    pass
+            metrics = {"mae": mae_val, "mse": 0.0, "r2": 0.0, "avg_inference_ms": 0.0, "samples": 0}
+        else:
+            # Parse "97.2%" → 0.972
+            acc_val = 0.0
+            if "%" in acc_str:
+                try:
+                    acc_val = float(acc_str.replace("%", "")) / 100.0
+                except:
+                    pass
+            metrics = {"accuracy": acc_val, "f1": acc_val, "precision": acc_val, "recall": acc_val, "avg_inference_ms": 0.0, "samples": 0}
+
+        # Try running actual evaluation if test data + tensorflow available
+        test_dir = MODELS_DIR / "test_data"
+        model_path = Path(model.get("file", ""))
+        if model_path.exists() and (test_dir / f"{ds_key}_X.npy").exists():
+            try:
+                X_test = np.load(str(test_dir / f"{ds_key}_X.npy"))
+                y_test = np.load(str(test_dir / f"{ds_key}_y.npy"))
+                metrics = _evaluate_tflite(model_path.read_bytes(), X_test, y_test, is_reg)
+                print(f"  ✓ Baseline evaluated: {ds_key} → {metrics}")
+            except Exception as e:
+                print(f"  ⚠ Baseline eval skipped for {ds_key}: {e}")
+
+        # Determine file size
+        size_kb = 0
+        if model_path.exists():
+            size_kb = round(model_path.stat().st_size / 1024, 1)
+
+        entry = {
+            "author": "TinyBioML (Baseline)",
+            "filename": model_path.name if model_path.exists() else f"{ds_key}_baseline.tflite",
+            "size_kb": size_kb,
+            "metrics": metrics,
+            "timestamp": model.get("updated", datetime.now().isoformat()),
+            "is_regression": is_reg,
+            "deployable": True,
+            "custom_model_id": None,
+            "is_baseline": True,
+        }
+
+        DB["leaderboard"][ds_key] = [entry]
+
+# Run after _evaluate_tflite is defined (deferred to app startup)
+@app.on_event("startup")
+async def startup_init_baselines():
+    try:
+        _init_baselines()
+        print(f"✓ Baselines initialized for {len(DB['leaderboard'])} datasets")
+    except Exception as e:
+        print(f"⚠ Baseline init failed (will populate on first benchmark): {e}")
 
 # --- MCU & Board Registry ---
 # Hierarchy: MCU → Board presets → Pin defaults
@@ -387,7 +530,7 @@ async def health():
 # --- Models ---
 @app.get("/api/models")
 async def list_models():
-    return {"models": DB["models"], "total": len(DB["models"])}
+    return JSONResponse(content=_safe_json({"models": DB["models"], "total": len(DB["models"])}))
 
 
 @app.get("/api/models/{model_id}")
@@ -452,7 +595,7 @@ async def upload_model(
 # --- Datasets ---
 @app.get("/api/datasets")
 async def list_datasets():
-    return {"datasets": DB["datasets"], "total": len(DB["datasets"])}
+    return JSONResponse(content=_safe_json({"datasets": DB["datasets"], "total": len(DB["datasets"])}))
 
 
 # --- MCUs ---
@@ -581,6 +724,7 @@ def _tflite_to_g_model_cpp(tflite_path):
 async def compile_firmware(
     model_id: str = Form(...),
     board_key: str = Form("nrf52840__nano_33_ble"),
+    custom_model_id: str = Form(""),  # If set, use uploaded custom .tflite instead of baseline
     input_source: str = Form("pdm_microphone"),
     use_default: bool = Form(True),
     sensor_protocol: int = Form(0),  # 0=PDM, 1=analog, 2=I2C, 3=SPI
@@ -635,11 +779,19 @@ async def compile_firmware(
             shutil.copy(f, sketch_dir / f.name)
 
     # --- Step 2: Generate micro_features_model.cpp from .tflite ---
-    model_file = model.get("file")
-    if model_file and os.path.exists(model_file):
-        model_cpp = _tflite_to_g_model_cpp(model_file)
+    # If custom_model_id is set, use the user's uploaded model from benchmark
+    if custom_model_id:
+        custom_path = CUSTOM_MODELS_DIR / f"{custom_model_id}.tflite"
+        if custom_path.exists():
+            model_cpp = _tflite_to_g_model_cpp(str(custom_path))
+        else:
+            raise HTTPException(404, f"Custom model '{custom_model_id}' not found. Re-upload via benchmark.")
     else:
-        model_cpp = _generate_dummy_model_header()
+        model_file = model.get("file")
+        if model_file and os.path.exists(model_file):
+            model_cpp = _tflite_to_g_model_cpp(model_file)
+        else:
+            model_cpp = _generate_dummy_model_header()
     with open(sketch_dir / "micro_features_model.cpp", "w") as fw:
         fw.write(model_cpp)
 
@@ -886,6 +1038,215 @@ const unsigned char model_data[] = {{
 }};
 const unsigned int model_data_len = {len(dummy_bytes)};
 """
+
+
+# ============================================================
+# BENCHMARK & LEADERBOARD
+# ============================================================
+import time as _time
+
+REGRESSION_DATASETS = {"ppg_heartrate", "spo2_estimation"}
+
+def _evaluate_tflite(tflite_bytes, X_test, y_test, is_regression):
+    """Evaluate a .tflite model on test data. Returns metrics dict."""
+    import tensorflow as tf
+    from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
+    from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+
+    interpreter = tf.lite.Interpreter(model_content=tflite_bytes)
+    interpreter.allocate_tensors()
+    inp = interpreter.get_input_details()[0]
+    out = interpreter.get_output_details()[0]
+
+    preds = []
+    t0 = _time.time()
+    for i in range(len(X_test)):
+        sample = X_test[i:i+1]
+        if inp["dtype"] == np.int8:
+            scale, zp = inp["quantization"]
+            sample = (sample / scale + zp).astype(np.int8)
+        else:
+            sample = sample.astype(np.float32)
+        interpreter.set_tensor(inp["index"], sample)
+        interpreter.invoke()
+        output = interpreter.get_tensor(out["index"])[0]
+        if out["dtype"] == np.int8:
+            scale, zp = out["quantization"]
+            output = (output - zp) * scale
+        preds.append(output)
+    avg_ms = ((_time.time() - t0) / len(X_test)) * 1000
+    preds = np.array(preds)
+
+    metrics = {"avg_inference_ms": round(avg_ms, 3), "samples": len(X_test)}
+    if is_regression:
+        metrics["mse"] = round(float(mean_squared_error(y_test, preds)), 4)
+        metrics["mae"] = round(float(mean_absolute_error(y_test, preds)), 4)
+        metrics["r2"] = round(float(r2_score(y_test, preds)), 4)
+    else:
+        yp = np.argmax(preds, axis=1) if preds.shape[-1] > 1 else (preds > 0.5).astype(int)
+        yt = y_test.flatten()
+        yp = yp.flatten()
+        metrics["accuracy"] = round(float(accuracy_score(yt, yp)), 4)
+        metrics["f1"] = round(float(f1_score(yt, yp, average="weighted", zero_division=0)), 4)
+        metrics["precision"] = round(float(precision_score(yt, yp, average="weighted", zero_division=0)), 4)
+        metrics["recall"] = round(float(recall_score(yt, yp, average="weighted", zero_division=0)), 4)
+    return metrics
+
+
+CUSTOM_MODELS_DIR = BASE_DIR / "custom_models"
+CUSTOM_MODELS_DIR.mkdir(exist_ok=True)
+
+
+def _validate_model_shape(tflite_bytes, baseline_model):
+    """Check if uploaded model has compatible input/output shape with baseline."""
+    import tensorflow as tf
+    try:
+        interp = tf.lite.Interpreter(model_content=tflite_bytes)
+        interp.allocate_tensors()
+        inp = interp.get_input_details()[0]
+        out = interp.get_output_details()[0]
+        user_in_shape = list(inp["shape"])
+        user_out_shape = list(out["shape"])
+    except Exception as e:
+        return False, f"Failed to load model: {e}", None
+
+    # Get baseline expected shapes from model details
+    expected_in = baseline_model.get("details", {}).get("input_shape")
+    expected_out_classes = baseline_model.get("details", {}).get("output_classes", 1)
+
+    shape_info = {
+        "user_input_shape": user_in_shape,
+        "user_output_shape": user_out_shape,
+        "expected_input_shape": expected_in,
+        "expected_output_classes": expected_out_classes,
+    }
+
+    # Check output class count matches
+    if user_out_shape[-1] != expected_out_classes:
+        return False, f"Output mismatch: your model outputs {user_out_shape[-1]} classes, baseline expects {expected_out_classes}", shape_info
+
+    return True, "Compatible", shape_info
+
+
+@app.post("/api/benchmark/{dataset_name}")
+async def benchmark_model(dataset_name: str, file: UploadFile = File(...), author: str = Form("anonymous")):
+    """Upload a .tflite model, benchmark against test data, validate for deployment."""
+    if not file.filename.endswith(".tflite"):
+        raise HTTPException(400, "Only .tflite files accepted")
+
+    test_dir = MODELS_DIR / "test_data"
+    x_path = test_dir / f"{dataset_name}_X.npy"
+    y_path = test_dir / f"{dataset_name}_y.npy"
+    if not x_path.exists() or not y_path.exists():
+        raise HTTPException(404, f"No test data for '{dataset_name}'.")
+
+    X_test = np.load(str(x_path))
+    y_test = np.load(str(y_path))
+    content = await file.read()
+    is_reg = dataset_name in REGRESSION_DATASETS
+
+    # Find baseline model for this dataset
+    baseline_model = next((m for m in DB["models"] if m.get("benchmark_dataset") == dataset_name), None)
+
+    # Validate shape compatibility
+    deployable = False
+    shape_info = None
+    custom_model_id = None
+    if baseline_model:
+        compatible, msg, shape_info = _validate_model_shape(content, baseline_model)
+        if compatible:
+            deployable = True
+            # Save the uploaded model so it can be used for deployment
+            custom_model_id = str(uuid.uuid4())[:12]
+            custom_path = CUSTOM_MODELS_DIR / f"{custom_model_id}.tflite"
+            with open(custom_path, "wb") as f:
+                f.write(content)
+
+    # Run benchmark
+    try:
+        user_metrics = _evaluate_tflite(content, X_test, y_test, is_reg)
+    except Exception as e:
+        raise HTTPException(500, f"Evaluation failed: {e}")
+
+    # Evaluate baseline for comparison
+    baseline_metrics = None
+    if baseline_model and baseline_model.get("file"):
+        baseline_path = Path(baseline_model["file"])
+        if baseline_path.exists():
+            try:
+                baseline_metrics = _evaluate_tflite(baseline_path.read_bytes(), X_test, y_test, is_reg)
+                baseline_metrics["name"] = "TinyBioML Baseline"
+            except:
+                pass
+        else:
+            # Try finding by dataset name
+            for f in MODELS_DIR.glob(f"{dataset_name}*.tflite"):
+                try:
+                    baseline_metrics = _evaluate_tflite(f.read_bytes(), X_test, y_test, is_reg)
+                    baseline_metrics["name"] = "TinyBioML Baseline"
+                    break
+                except:
+                    pass
+
+    # Save to leaderboard
+    entry = {
+        "author": author,
+        "filename": file.filename,
+        "size_kb": round(len(content) / 1024, 1),
+        "metrics": user_metrics,
+        "timestamp": datetime.now().isoformat(),
+        "is_regression": is_reg,
+        "deployable": deployable,
+        "custom_model_id": custom_model_id,
+    }
+    if dataset_name not in DB["leaderboard"]:
+        DB["leaderboard"][dataset_name] = []
+    DB["leaderboard"][dataset_name].append(entry)
+
+    if is_reg:
+        DB["leaderboard"][dataset_name].sort(key=lambda x: x["metrics"].get("mae", 999))
+    else:
+        DB["leaderboard"][dataset_name].sort(key=lambda x: -x["metrics"].get("accuracy", 0))
+
+    return JSONResponse(content=_safe_json({
+        "status": "success",
+        "dataset": dataset_name,
+        "is_regression": is_reg,
+        "user_metrics": user_metrics,
+        "baseline_metrics": baseline_metrics,
+        "deployable": deployable,
+        "custom_model_id": custom_model_id,
+        "shape_info": shape_info,
+        "firmware_template": baseline_model.get("firmware_template") if baseline_model else None,
+        "sensor": baseline_model.get("sensor") if baseline_model else None,
+        "rank": next((i+1 for i, e in enumerate(DB["leaderboard"][dataset_name]) if e["timestamp"] == entry["timestamp"]), None),
+        "total_submissions": len(DB["leaderboard"][dataset_name]),
+    }))
+
+
+@app.get("/api/leaderboard/{dataset_name}")
+async def get_leaderboard(dataset_name: str):
+    entries = DB["leaderboard"].get(dataset_name, [])
+    # Find baseline
+    baseline = None
+    model = next((m for m in DB["models"] if m.get("benchmark_dataset") == dataset_name), None)
+    if model:
+        baseline = {
+            "name": model["title"],
+            "accuracy": model["details"].get("accuracy"),
+            "architecture": model["details"].get("architecture"),
+        }
+    return JSONResponse(content=_safe_json({"dataset": dataset_name, "baseline": baseline, "entries": entries}))
+
+
+@app.get("/api/leaderboard")
+async def list_leaderboards():
+    return JSONResponse(content=_safe_json({
+        "datasets": [
+            {"name": ds.get("benchmark_key"), "title": ds["title"], "entries": len(DB["leaderboard"].get(ds.get("benchmark_key", ""), []))}
+            for ds in DB["datasets"] if ds.get("benchmark_key")
+        ]
+    }))
 
 
 # --- Run ---

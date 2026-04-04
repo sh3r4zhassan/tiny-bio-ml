@@ -3,6 +3,7 @@ import {
   Search, Database, Box, Users, BookOpen, Cpu, Activity,
   Download, Heart, X, Zap, Github, Upload, Usb,
   Terminal, Radio, AlertTriangle, Check, Loader2, ArrowLeft,
+  Trophy, BarChart2,
 } from 'lucide-react';
 import { useStore } from './store/useStore';
 import { useWebSerial } from './hooks/useWebSerial';
@@ -112,6 +113,238 @@ const PortSelector = ({ value, onChange }) => {
 };
 
 // ==================================================================
+// BENCHMARK VIEW (upload model, compare to baseline, leaderboard)
+// ==================================================================
+const API_BASE = 'http://localhost:8000/api';
+
+const MetricBar = ({ label, value, max, color, suffix = '' }) => (
+  <div className="space-y-1">
+    <div className="flex justify-between text-xs">
+      <span className="text-gray-600">{label}</span>
+      <span className="font-bold" style={{ color }}>{typeof value === 'number' ? value.toFixed(4) : value}{suffix}</span>
+    </div>
+    <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+      <div className="h-full rounded-full transition-all duration-500" style={{ width: `${Math.min((value / max) * 100, 100)}%`, backgroundColor: color }} />
+    </div>
+  </div>
+);
+
+const BenchmarkView = ({ datasets, onDeploy }) => {
+  const [selectedDs, setSelectedDs] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [result, setResult] = useState(null);
+  const [leaderboard, setLeaderboard] = useState([]);
+  const [author, setAuthor] = useState('');
+  const fileRef = useRef(null);
+
+  const benchmarkDs = datasets.filter(d => d.benchmark_key);
+
+  const fetchLeaderboard = async (dsKey) => {
+    try {
+      const r = await fetch(`${API_BASE}/leaderboard/${dsKey}`);
+      const d = await r.json();
+      setLeaderboard(d.entries || []);
+    } catch { setLeaderboard([]); }
+  };
+
+  const handleUpload = async () => {
+    if (!fileRef.current?.files[0] || !selectedDs) return;
+    setUploading(true);
+    setResult(null);
+    const fd = new FormData();
+    fd.append('file', fileRef.current.files[0]);
+    fd.append('author', author || 'anonymous');
+    try {
+      const r = await fetch(`${API_BASE}/benchmark/${selectedDs.benchmark_key}`, { method: 'POST', body: fd });
+      const d = await r.json();
+      if (r.ok) {
+        setResult(d);
+        fetchLeaderboard(selectedDs.benchmark_key);
+      } else {
+        setResult({ status: 'error', error: d.detail || 'Benchmark failed' });
+      }
+    } catch (e) { setResult({ status: 'error', error: e.message }); }
+    setUploading(false);
+  };
+
+  useEffect(() => { if (selectedDs) fetchLeaderboard(selectedDs.benchmark_key); }, [selectedDs]);
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2 mb-2"><Trophy className="w-6 h-6 text-yellow-500" /> Benchmark Arena</h2>
+        <p className="text-gray-500">Upload your .tflite model and compare it against our baselines on the same holdout test data. Fair, reproducible, transparent.</p>
+      </div>
+
+      {/* Dataset selector */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {benchmarkDs.map((ds) => (
+          <button key={ds.id} onClick={() => { setSelectedDs(ds); setResult(null); }}
+            className={`p-3 rounded-xl border text-left transition-all ${selectedDs?.id === ds.id ? 'border-yellow-400 bg-yellow-50 ring-1 ring-yellow-400' : 'border-gray-200 hover:border-gray-300 bg-white'}`}>
+            <div className="text-xs font-bold text-gray-900 truncate">{ds.title}</div>
+            <div className="text-[10px] text-gray-500 mt-1">{ds.rows}</div>
+          </button>
+        ))}
+      </div>
+
+      {selectedDs && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Upload panel */}
+          <div className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
+            <h3 className="font-semibold text-gray-900 flex items-center gap-2"><Upload className="w-4 h-4" /> Submit Your Model</h3>
+            <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-700">
+              <span className="font-medium">Dataset:</span> {selectedDs.title}<br />
+              Your model must accept the same input shape and output format as our baseline. We evaluate on a holdout 20% test split.
+            </div>
+            <div>
+              <label className="text-xs text-gray-500">Your Name / Team</label>
+              <input type="text" value={author} onChange={(e) => setAuthor(e.target.value)}
+                className="mt-0.5 block w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="anonymous" />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500">Upload .tflite Model</label>
+              <input ref={fileRef} type="file" accept=".tflite"
+                className="mt-0.5 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-yellow-50 file:text-yellow-700 hover:file:bg-yellow-100" />
+            </div>
+            <button onClick={handleUpload} disabled={uploading}
+              className="w-full py-2.5 bg-gray-900 text-white rounded-lg font-semibold text-sm hover:bg-gray-800 disabled:bg-gray-300 flex items-center justify-center gap-2">
+              {uploading ? <><Loader2 className="w-4 h-4 animate-spin" /> Evaluating...</> : <><BarChart2 className="w-4 h-4" /> Run Benchmark</>}
+            </button>
+
+            {/* Results */}
+            {result && result.status === 'success' && (
+              <div className="space-y-4 pt-3 border-t border-gray-200">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-semibold text-gray-900 text-sm">Results</h4>
+                  <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">Rank #{result.rank} of {result.total_submissions}</span>
+                </div>
+                {!result.is_regression ? (
+                  <div className="space-y-3">
+                    <MetricBar label="Accuracy" value={result.user_metrics.accuracy} max={1} color="#22c55e" />
+                    <MetricBar label="F1 Score" value={result.user_metrics.f1} max={1} color="#3b82f6" />
+                    <MetricBar label="Precision" value={result.user_metrics.precision} max={1} color="#8b5cf6" />
+                    <MetricBar label="Recall" value={result.user_metrics.recall} max={1} color="#f59e0b" />
+                    {result.baseline_metrics && (
+                      <div className="pt-2 border-t border-gray-100">
+                        <div className="text-[10px] text-gray-500 mb-2">vs. Baseline ({result.baseline_metrics.name})</div>
+                        <ComparisonChart user={result.user_metrics} baseline={result.baseline_metrics} isRegression={false} />
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <MetricBar label="MAE" value={result.user_metrics.mae} max={10} color="#f59e0b" />
+                    <MetricBar label="MSE" value={result.user_metrics.mse} max={100} color="#ef4444" />
+                    <MetricBar label="R²" value={result.user_metrics.r2} max={1} color="#22c55e" />
+                    {result.baseline_metrics && (
+                      <div className="pt-2 border-t border-gray-100">
+                        <div className="text-[10px] text-gray-500 mb-2">vs. Baseline ({result.baseline_metrics.name})</div>
+                        <ComparisonChart user={result.user_metrics} baseline={result.baseline_metrics} isRegression={true} />
+                      </div>
+                    )}
+                  </div>
+                )}
+                <div className="text-xs text-gray-500">Inference: {result.user_metrics.avg_inference_ms.toFixed(2)}ms/sample on server</div>
+                {result.deployable && result.custom_model_id && (
+                  <button onClick={() => onDeploy && onDeploy(result)}
+                    className="w-full mt-3 py-2.5 bg-green-600 text-white rounded-lg font-semibold text-sm hover:bg-green-700 flex items-center justify-center gap-2">
+                    <Zap className="w-4 h-4" /> Deploy This Model to Device
+                  </button>
+                )}
+                {result.deployable === false && result.shape_info && (
+                  <div className="mt-2 p-2 bg-orange-50 border border-orange-200 rounded text-[10px] text-orange-700">
+                    Shape mismatch — cannot deploy. Your output: {JSON.stringify(result.shape_info.user_output_shape)}, expected {result.shape_info.expected_output_classes} classes.
+                  </div>
+                )}
+              </div>
+            )}
+            {result && result.status === 'error' && (
+              <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">{result.error}</div>
+            )}
+          </div>
+
+          {/* Leaderboard */}
+          <div className="bg-white border border-gray-200 rounded-xl p-5">
+            <h3 className="font-semibold text-gray-900 flex items-center gap-2 mb-4"><Trophy className="w-4 h-4 text-yellow-500" /> Leaderboard: {selectedDs.title}</h3>
+            {leaderboard.length === 0 ? (
+              <div className="text-center py-12 text-gray-400">
+                <Trophy className="w-10 h-10 mx-auto mb-3 text-gray-300" />
+                <p className="text-sm">No submissions yet. Be the first!</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {leaderboard.map((entry, i) => {
+                  const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`;
+                  const mainMetric = entry.is_regression
+                    ? `MAE: ${entry.metrics.mae?.toFixed(3)}`
+                    : `Acc: ${(entry.metrics.accuracy * 100).toFixed(1)}%`;
+                  const secondaryMetric = entry.is_regression
+                    ? `R²: ${entry.metrics.r2?.toFixed(3)}`
+                    : `F1: ${entry.metrics.f1?.toFixed(3)}`;
+                  return (
+                    <div key={i} className={`flex items-center gap-3 p-3 rounded-lg border ${i === 0 ? 'border-yellow-200 bg-yellow-50' : 'border-gray-100'}`}>
+                      <span className="text-lg w-8 text-center flex-shrink-0">{medal}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium text-gray-900 truncate">
+                          {entry.author}
+                          {entry.is_baseline && <span className="ml-1.5 text-[9px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">baseline</span>}
+                        </div>
+                        <div className="text-[10px] text-gray-500">{entry.filename} ({entry.size_kb}KB) — {new Date(entry.timestamp).toLocaleDateString()}</div>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <div className="text-sm font-bold text-gray-900">{mainMetric}</div>
+                        <div className="text-[10px] text-gray-500">{secondaryMetric}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Comparison bar chart (SVG)
+const ComparisonChart = ({ user, baseline, isRegression }) => {
+  const W = 500, H = 140;
+  const metrics = isRegression
+    ? [{ key: 'mae', label: 'MAE', lower: true }, { key: 'mse', label: 'MSE', lower: true }, { key: 'r2', label: 'R²', lower: false }]
+    : [{ key: 'accuracy', label: 'Accuracy' }, { key: 'f1', label: 'F1' }, { key: 'precision', label: 'Precision' }, { key: 'recall', label: 'Recall' }];
+
+  const barW = W / (metrics.length * 3);
+  const maxVal = isRegression ? undefined : 1;
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-32">
+      {metrics.map((m, i) => {
+        const uv = user[m.key] || 0;
+        const bv = baseline[m.key] || 0;
+        const max = maxVal || Math.max(uv, bv, 0.01) * 1.2;
+        const x = i * (W / metrics.length) + 20;
+        const uh = (uv / max) * (H - 30);
+        const bh = (bv / max) * (H - 30);
+        return (
+          <g key={m.key}>
+            <rect x={x} y={H - 20 - bh} width={barW} height={bh} fill="#94a3b8" rx={3} opacity={0.6} />
+            <rect x={x + barW + 4} y={H - 20 - uh} width={barW} height={uh} fill="#eab308" rx={3} />
+            <text x={x + barW} y={H - 6} textAnchor="middle" fill="#6b7280" fontSize="9">{m.label}</text>
+          </g>
+        );
+      })}
+      <g transform={`translate(${W - 100}, 10)`}>
+        <rect width={8} height={8} fill="#94a3b8" rx={2} />
+        <text x={12} y={8} fill="#6b7280" fontSize="8">Baseline</text>
+        <rect y={14} width={8} height={8} fill="#eab308" rx={2} />
+        <text x={12} y={22} fill="#6b7280" fontSize="8">Your Model</text>
+      </g>
+    </svg>
+  );
+};
+
+// ==================================================================
 // NAVBAR
 // ==================================================================
 const Navbar = ({ activeTab, setActiveTab, isConnected, onConnectClick }) => (
@@ -132,7 +365,7 @@ const Navbar = ({ activeTab, setActiveTab, isConnected, onConnectClick }) => (
           </div>
         </div>
         <div className="flex items-center space-x-4 text-sm font-medium text-gray-600">
-          {['models', 'datasets', 'deploy', 'docs'].map((tab) => (
+          {['models', 'datasets', 'deploy', 'benchmark', 'docs'].map((tab) => (
             <button key={tab} onClick={() => setActiveTab(tab)}
               className={`capitalize ${activeTab === tab ? 'text-gray-900 border-b-2 border-yellow-400' : 'hover:text-gray-900'}`}>
               {tab}
@@ -298,6 +531,13 @@ const DeployPanel = ({ model, deployState, mcus, boards, serial }) => {
       </div>
 
       <div className="p-4 space-y-4">
+        {/* Custom model indicator */}
+        {deployState.customModelId && (
+          <div className="p-2 bg-green-50 border border-green-200 rounded-lg text-xs text-green-700 flex items-center gap-2">
+            <Upload className="w-3.5 h-3.5" />
+            <span>Deploying your custom model (benchmarked). Using {model.title} firmware skeleton.</span>
+          </div>
+        )}
         {/* Steps 1-4: MCU → Board → Sensor Config (PinConfigurator) */}
         <PinConfigurator
           config={deployState}
@@ -430,20 +670,27 @@ const SerialMonitor = ({ serial }) => {
 // DATASET CARD
 // ==================================================================
 const DatasetCard = ({ dataset }) => (
-  <div className="bg-white border border-gray-200 rounded-xl p-5 hover:shadow-md transition-shadow cursor-pointer">
+  <a href={dataset.url || '#'} target="_blank" rel="noopener noreferrer"
+    className="block bg-white border border-gray-200 rounded-xl p-5 hover:shadow-md hover:border-blue-200 transition-all cursor-pointer">
     <div className="flex justify-between items-start mb-2">
       <h3 className="text-md font-bold text-gray-900 font-mono tracking-tight">{dataset.slug || dataset.id}</h3>
       <span className="text-xs font-medium bg-red-100 text-red-800 px-2 py-0.5 rounded border border-red-200">Dataset</span>
     </div>
-    <p className="text-sm text-gray-600 mb-4">{dataset.description}</p>
+    <p className="text-sm text-gray-600 mb-3">{dataset.description}</p>
+    <div className="flex flex-wrap gap-2 mb-3">
+      <span className="text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded font-mono">{dataset.size}</span>
+      <span className="text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded font-mono">{dataset.rows}</span>
+      {dataset.license && (
+        <span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded">{dataset.license}</span>
+      )}
+    </div>
     <div className="flex items-center justify-between text-xs text-gray-500 border-t border-gray-100 pt-3">
       <span className="flex items-center gap-1"><Download className="w-3 h-3" /> {typeof dataset.downloads === 'number' ? `${(dataset.downloads / 1000).toFixed(1)}k` : dataset.downloads}</span>
-      <div className="flex items-center gap-2">
-        <span className="bg-gray-100 px-2 py-1 rounded font-mono">{dataset.size}</span>
-        <span className="bg-gray-100 px-2 py-1 rounded font-mono">{dataset.rows} rows</span>
-      </div>
+      {dataset.url && (
+        <span className="text-blue-500 hover:text-blue-700 text-xs font-medium">View Source ↗</span>
+      )}
     </div>
-  </div>
+  </a>
 );
 
 // ==================================================================
@@ -583,6 +830,19 @@ export default function App() {
                     {datasets.map((ds) => <DatasetCard key={ds.id} dataset={ds} />)}
                   </div>
                 </>
+              )}
+              {activeTab === 'benchmark' && (
+                <BenchmarkView datasets={datasets} onDeploy={(benchResult) => {
+                  // Find the baseline model for this dataset
+                  const baselineModel = models.find(m => m.benchmark_dataset === benchResult.dataset);
+                  if (baselineModel) {
+                    setSelectedModel(baselineModel);
+                    resetDeploy();
+                    // Set the custom model ID so compile uses the uploaded .tflite
+                    useStore.getState().setDeployConfig({ customModelId: benchResult.custom_model_id });
+                    setActiveTab('deploy');
+                  }
+                }} />
               )}
               {activeTab === 'docs' && (
                 <div className="flex flex-col items-center justify-center py-20 bg-gray-50 rounded-xl border-2 border-dashed border-gray-200">

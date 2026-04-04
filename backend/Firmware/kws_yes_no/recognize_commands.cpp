@@ -102,7 +102,7 @@ TfLiteStatus RecognizeCommands::ProcessLatestResults(
       }
     }
   }
-  for (int i = 0; i < kCategoryCount; ++i) {
+  for (int i = 0; i < kCategoryCount; ++i) {s
     average_scores[i] /= how_many_results;
   }
 
